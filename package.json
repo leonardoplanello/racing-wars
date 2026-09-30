@@ -1,0 +1,22 @@
+{
+  "name": "racing-wars",
+  "version": "0.1.0",
+  "description": "Racing Wars - corrida top-down para ate 8 jogadores com celulares como controle.",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "build": "node tools/build.js",
+    "start": "node server/index.js",
+    "test": "node --test \"test/*.test.js\"",
+    "smoke": "node tools/smoke.js",
+    "phones": "node tools/fake-phones.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "qrcode-generator": "^2.0.4",
+    "three": "^0.186.1",
+    "ws": "^8.22.0"
+  }
+}

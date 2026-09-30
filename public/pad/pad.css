@@ -1,0 +1,43 @@
+:root { --bg: #1b2236; --font: "Trebuchet MS", "Segoe UI", system-ui, sans-serif; }
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; -webkit-touch-callout: none; user-select: none; -webkit-user-select: none; }
+html, body { margin: 0; height: 100%; overflow: hidden; overscroll-behavior: none; touch-action: none; font-family: var(--font); color: #fff; background: var(--bg); transition: background .25s; }
+[hidden] { display: none !important; }
+.view { position: fixed; inset: 0; }
+#join { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; padding: 20px; text-align: center; background: radial-gradient(ellipse at 50% 20%, #2a3a5c, #0b0e16 80%); touch-action: auto; }
+#join p { margin: 0; color: #b9c3dc; }
+.logo { font-size: 44px; line-height: .9; font-weight: 900; font-style: italic; color: #ffd60a; text-shadow: 0 4px 0 #b33a00; }
+input { width: min(320px, 90vw); font: 800 26px var(--font); padding: 12px; border-radius: 12px; border: 3px solid #ffffff30; background: #0006; color: #fff; text-align: center; text-transform: uppercase; outline: none; user-select: text; -webkit-user-select: text; }
+#name { font-size: 18px; text-transform: none; }
+input:focus { border-color: #ffd60a; }
+#go, .mrow button, .back { border: 0; border-radius: 16px; font: 900 24px var(--font); color: #221a00; background: #ffd60a; box-shadow: 0 6px 0 #a8870a; padding: 14px 40px; }
+#go:active, .mrow button:active, .back:active { transform: translateY(3px); box-shadow: 0 3px 0 #a8870a; }
+#err { color: #ff8a8a; min-height: 1.2em; font-weight: 700; }
+
+#pad { display: flex; flex-direction: column; }
+#hdr { position: absolute; top: 0; left: 0; right: 0; display: flex; align-items: center; gap: 14px; padding: calc(8px + env(safe-area-inset-top)) calc(14px + env(safe-area-inset-right)) 8px calc(14px + env(safe-area-inset-left)); z-index: 5; pointer-events: none; font-weight: 800; text-shadow: 0 2px 0 #0007; }
+#pts { margin-left: auto; font-size: 20px; }
+#ping { font-size: 14px; color: #4dff88; }
+#fs { pointer-events: auto; background: #0004; border: 0; color: #fff; font-size: 22px; border-radius: 8px; padding: 2px 8px; }
+#drive { position: absolute; inset: 0; display: flex; }
+.half { flex: 1; display: flex; align-items: center; justify-content: center; position: relative; }
+.half.left { border-right: 3px dashed #ffffff40; }
+.hint { text-align: center; font-weight: 900; font-size: 26px; letter-spacing: 2px; color: #ffffff70; }
+.hint small { font-size: 14px; letter-spacing: 1px; }
+#anchor { position: fixed; width: 90px; height: 90px; margin: -45px 0 0 -45px; border-radius: 50%; border: 4px solid #ffffffaa; background: #ffffff22; display: none; pointer-events: none; }
+#anchor::after { content: ""; position: absolute; left: 50%; top: 50%; width: 46px; height: 46px; margin: -23px; border-radius: 50%; background: #fff; transform: translateX(var(--dx, 0px)); }
+#item { text-align: center; }
+#ico { font-size: 88px; line-height: 1; filter: drop-shadow(0 4px 0 #0005); }
+#itl { font-weight: 900; font-size: 22px; letter-spacing: 2px; text-shadow: 0 2px 0 #0007; }
+.half.right.flash { background: #ffffff33; }
+#menu { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 18px; padding: 20px; }
+#mtitle { font-weight: 900; font-size: 22px; text-align: center; text-shadow: 0 2px 0 #0007; padding-top: 24px; }
+.mrow { display: flex; gap: 16px; }
+.mrow button { min-width: 110px; padding: 20px 26px; font-size: 32px; }
+.mrow button.ok { min-width: 170px; background: #4dff88; box-shadow: 0 6px 0 #1e9c4f; }
+.back { background: #ff6b6b !important; box-shadow: 0 6px 0 #a33 !important; font-size: 18px !important; padding: 10px 26px !important; }
+#msg { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; font-weight: 900; font-size: 30px; text-shadow: 0 3px 0 #0007; gap: 8px; padding: 20px; }
+#msg small { font-size: 16px; font-weight: 700; opacity: .85; }
+#rotate { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; flex-direction: column; text-align: center; font-size: 22px; font-weight: 800; background: #0b0e16; z-index: 20; }
+#rotate .ph { font-size: 70px; animation: rot 1.6s infinite ease-in-out; }
+@keyframes rot { 0%, 30% { transform: rotate(0); } 70%, 100% { transform: rotate(90deg); } }
+@media (orientation: portrait) { body.landscape #rotate { display: flex; } }

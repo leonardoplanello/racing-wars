@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#0b0e16">
+<title>Racing Wars — Controle</title>
+<link rel="stylesheet" href="/pad/pad.css">
+</head>
+<body>
+<div id="join" class="view">
+  <div class="logo">RACING<br>WARS</div>
+  <p>Digite o código que aparece na tela</p>
+  <input id="code" maxlength="4" autocapitalize="characters" autocomplete="off" spellcheck="false" placeholder="ABCD">
+  <input id="name" maxlength="14" autocomplete="off" placeholder="Seu nome (opcional)">
+  <button id="go">ENTRAR</button>
+  <div id="err"></div>
+</div>
+
+<div id="pad" class="view" hidden>
+  <div id="hdr"><span id="who"></span><span id="pts"></span><span id="ping">●</span><button id="fs" aria-label="Tela cheia">⛶</button></div>
+  <div id="drive" hidden>
+    <div class="half left"><div class="hint">DIREÇÃO<br><small>deslize aqui</small></div><div id="anchor"></div></div>
+    <div class="half right"><div id="item"><div id="ico"></div><div id="itl"></div></div><div class="hint" id="firehint">TOQUE PARA USAR</div></div>
+  </div>
+  <div id="menu" hidden>
+    <div id="mtitle"></div>
+    <div class="mrow">
+      <button data-k="left">◀</button>
+      <button data-k="ok" class="ok">OK</button>
+      <button data-k="right">▶</button>
+    </div>
+    <button data-k="back" class="back">VOLTAR</button>
+  </div>
+  <div id="msg" hidden></div>
+</div>
+<div id="rotate"><div class="ph">📱</div>Gire o celular<br>para o modo paisagem</div>
+<script src="/pad/pad.js" type="module"></script>
+</body>
+</html>

@@ -1,0 +1,274 @@
+// Texturas procedurais em canvas (sem arquivos). Estilo cartoon 3D: cores vivas, veios e rebites.
+import * as THREE from 'three';
+import { makeRng } from '/sim/rng.js';
+
+function canvas(w, h) {
+  const c = document.createElement('canvas');
+  c.width = w; c.height = h;
+  return [c, c.getContext('2d')];
+}
+
+function toTex(c, { repeat = true, srgb = true, aniso = 8 } = {}) {
+  const t = new THREE.CanvasTexture(c);
+  if (repeat) t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  if (srgb) t.colorSpace = THREE.SRGBColorSpace;
+  t.anisotropy = aniso;
+  t.generateMipmaps = true;
+  t.minFilter = THREE.LinearMipmapLinearFilter;
+  return t;
+}
+
+const shade = (r, g, b, k) => `rgb(${Math.max(0, Math.min(255, r * k)) | 0},${Math.max(0, Math.min(255, g * k)) | 0},${Math.max(0, Math.min(255, b * k)) | 0})`;
+
+/** Tabuas de madeira correndo no sentido do comprimento da pista (eixo v). */
+export function woodTexture() {
+  const rng = makeRng(11);
+  const [c, g] = canvas(256, 256);
+  const planks = 4, pw = 256 / planks;
+  for (let i = 0; i < planks; i++) {
+    const k = 0.82 + rng() * 0.36;
+    g.fillStyle = shade(150, 88, 46, k);
+    g.fillRect(i * pw, 0, pw, 256);
+    // veios
+    for (let j = 0; j < 14; j++) {
+      const x = i * pw + 4 + rng() * (pw - 8);
+      g.strokeStyle = shade(96, 52, 26, 0.85 + rng() * 0.4);
+      g.globalAlpha = 0.35;
+      g.lineWidth = 1 + rng() * 1.6;
+      g.beginPath();
+      g.moveTo(x, 0);
+      g.bezierCurveTo(x + (rng() - 0.5) * 8, 80, x + (rng() - 0.5) * 8, 170, x + (rng() - 0.5) * 4, 256);
+      g.stroke();
+    }
+    g.globalAlpha = 1;
+    // frestas e luz nas bordas
+    g.fillStyle = 'rgba(40,20,8,.85)';
+    g.fillRect(i * pw, 0, 3, 256);
+    g.fillStyle = 'rgba(255,200,140,.25)';
+    g.fillRect(i * pw + 3, 0, 2, 256);
+    // emendas e pregos
+    const seam = Math.floor(rng() * 200) + 28;
+    g.fillStyle = 'rgba(40,20,8,.8)';
+    g.fillRect(i * pw, seam, pw, 3);
+    g.fillStyle = 'rgba(30,30,34,.9)';
+    for (const y of [seam + 10, seam - 10]) {
+      g.beginPath(); g.arc(i * pw + 10, y, 2.2, 0, 7); g.arc(i * pw + pw - 10, y, 2.2, 0, 7); g.fill();
+    }
+  }
+  return toTex(c);
+}
+
+/** Aco azulado com rebites (vigas da ponte). */
+export function steelTexture() {
+  const [c, g] = canvas(128, 128);
+  const gr = g.createLinearGradient(0, 0, 0, 128);
+  gr.addColorStop(0, '#5d6f93'); gr.addColorStop(0.5, '#445272'); gr.addColorStop(1, '#2f3a55');
+  g.fillStyle = gr; g.fillRect(0, 0, 128, 128);
+  g.fillStyle = 'rgba(255,255,255,.12)'; g.fillRect(0, 0, 128, 10);
+  g.fillStyle = 'rgba(0,0,0,.25)'; g.fillRect(0, 118, 128, 10);
+  for (let i = 0; i < 4; i++) {
+    const x = 16 + i * 32;
+    for (const y of [24, 104]) {
+      g.fillStyle = '#1d2538'; g.beginPath(); g.arc(x, y, 6, 0, 7); g.fill();
+      g.fillStyle = '#8fa0c4'; g.beginPath(); g.arc(x - 1, y - 1, 4.2, 0, 7); g.fill();
+      g.fillStyle = '#d6e0f5'; g.beginPath(); g.arc(x - 2, y - 2, 1.6, 0, 7); g.fill();
+    }
+  }
+  return toTex(c);
+}
+
+export function asphaltTexture() {
+  const rng = makeRng(5);
+  const [c, g] = canvas(256, 256);
+  g.fillStyle = '#4b505a'; g.fillRect(0, 0, 256, 256);
+  for (let i = 0; i < 2600; i++) {
+    const v = 60 + rng() * 60;
+    g.fillStyle = `rgba(${v},${v},${v + 6},${0.25 + rng() * 0.35})`;
+    g.fillRect(rng() * 256, rng() * 256, 1 + rng() * 2, 1 + rng() * 2);
+  }
+  return toTex(c);
+}
+
+export function dirtTexture() {
+  const rng = makeRng(8);
+  const [c, g] = canvas(256, 256);
+  g.fillStyle = '#b98a55'; g.fillRect(0, 0, 256, 256);
+  for (let i = 0; i < 1800; i++) {
+    const k = 0.7 + rng() * 0.6;
+    g.fillStyle = shade(185, 138, 85, k); g.globalAlpha = 0.5;
+    g.beginPath(); g.arc(rng() * 256, rng() * 256, 1 + rng() * 4, 0, 7); g.fill();
+  }
+  g.globalAlpha = 1;
+  return toTex(c);
+}
+
+export function grassTexture() {
+  const rng = makeRng(3);
+  const [c, g] = canvas(256, 256);
+  g.fillStyle = '#4fae3c'; g.fillRect(0, 0, 256, 256);
+  for (let i = 0; i < 1400; i++) {
+    const k = 0.75 + rng() * 0.55;
+    g.strokeStyle = shade(72, 172, 52, k);
+    g.lineWidth = 1 + rng() * 1.5;
+    const x = rng() * 256, y = rng() * 256;
+    g.beginPath(); g.moveTo(x, y); g.lineTo(x + (rng() - 0.5) * 6, y - 4 - rng() * 8); g.stroke();
+  }
+  for (let i = 0; i < 40; i++) {
+    g.fillStyle = 'rgba(255,255,160,.35)';
+    g.beginPath(); g.arc(rng() * 256, rng() * 256, 1.5, 0, 7); g.fill();
+  }
+  return toTex(c);
+}
+
+/** Lamina de grama com alfa (tufos em cruz). */
+export function tuftTexture() {
+  const rng = makeRng(21);
+  const [c, g] = canvas(128, 128);
+  for (let i = 0; i < 22; i++) {
+    const x = 10 + rng() * 108, h = 50 + rng() * 70, lean = (rng() - 0.5) * 34;
+    const gr = g.createLinearGradient(0, 128, 0, 128 - h);
+    gr.addColorStop(0, '#2f7d2a'); gr.addColorStop(1, '#8be05a');
+    g.fillStyle = gr;
+    g.beginPath();
+    g.moveTo(x - 4, 128);
+    g.quadraticCurveTo(x + lean * 0.3, 128 - h * 0.6, x + lean, 128 - h);
+    g.quadraticCurveTo(x + lean * 0.3 + 3, 128 - h * 0.6, x + 4, 128);
+    g.fill();
+  }
+  return toTex(c, { aniso: 4 });
+}
+
+export function brickTexture() {
+  const rng = makeRng(2);
+  const [c, g] = canvas(128, 128);
+  g.fillStyle = '#7a4a2e'; g.fillRect(0, 0, 128, 128);
+  for (let r = 0; r < 8; r++) {
+    for (let i = -1; i < 4; i++) {
+      const x = i * 32 + (r % 2 ? 16 : 0);
+      g.fillStyle = shade(226, 120, 62, 0.85 + rng() * 0.3);
+      g.fillRect(x + 1.5, r * 16 + 1.5, 29, 13);
+    }
+  }
+  return toTex(c);
+}
+
+export function wallTexture() {
+  const [c, g] = canvas(128, 128);
+  g.fillStyle = '#f4efe2'; g.fillRect(0, 0, 128, 128);
+  g.fillStyle = 'rgba(0,0,0,.05)';
+  for (let i = 0; i < 128; i += 4) g.fillRect(0, i, 128, 1);
+  return toTex(c);
+}
+
+export function roofTexture() {
+  const [c, g] = canvas(128, 128);
+  g.fillStyle = '#b5472e'; g.fillRect(0, 0, 128, 128);
+  for (let r = 0; r < 8; r++) {
+    g.fillStyle = r % 2 ? '#c95a3d' : '#a93f28';
+    g.fillRect(0, r * 16, 128, 14);
+    g.fillStyle = 'rgba(0,0,0,.25)'; g.fillRect(0, r * 16 + 14, 128, 2);
+  }
+  return toTex(c);
+}
+
+export function windowTexture() {
+  const [c, g] = canvas(64, 64);
+  g.fillStyle = '#f4efe2'; g.fillRect(0, 0, 64, 64);
+  g.fillStyle = '#2a7fd1'; g.fillRect(14, 12, 36, 38);
+  g.fillStyle = '#9ad0ff'; g.fillRect(14, 12, 36, 14);
+  g.fillStyle = '#f4efe2'; g.fillRect(30, 12, 4, 38); g.fillRect(14, 29, 36, 4);
+  g.strokeStyle = '#8a7a66'; g.lineWidth = 3; g.strokeRect(13, 11, 38, 40);
+  return toTex(c, { repeat: false });
+}
+
+export function stoneTexture() {
+  const rng = makeRng(17);
+  const [c, g] = canvas(128, 128);
+  g.fillStyle = '#6f7077'; g.fillRect(0, 0, 128, 128);
+  for (let r = 0; r < 4; r++) for (let i = 0; i < 4; i++) {
+    g.fillStyle = shade(190, 186, 172, 0.8 + rng() * 0.35);
+    g.fillRect(i * 32 + 2 + (r % 2) * 10, r * 32 + 2, 26, 26);
+  }
+  return toTex(c);
+}
+
+export function waterTexture() {
+  const rng = makeRng(31);
+  const [c, g] = canvas(256, 256);
+  const gr = g.createLinearGradient(0, 0, 256, 256);
+  gr.addColorStop(0, '#1d7fd6'); gr.addColorStop(1, '#2aa0e8');
+  g.fillStyle = gr; g.fillRect(0, 0, 256, 256);
+  g.strokeStyle = 'rgba(255,255,255,.35)'; g.lineWidth = 2;
+  for (let i = 0; i < 46; i++) {
+    const x = rng() * 256, y = rng() * 256, w = 14 + rng() * 26;
+    g.beginPath(); g.moveTo(x, y); g.quadraticCurveTo(x + w / 2, y - 4, x + w, y); g.stroke();
+    // repete nas bordas para emendar
+    g.beginPath(); g.moveTo(x - 256, y); g.quadraticCurveTo(x - 256 + w / 2, y - 4, x - 256 + w, y); g.stroke();
+  }
+  return toTex(c);
+}
+
+export function checkerTexture(cols = 8, rows = 4) {
+  const q = 32;
+  const [c, g] = canvas(cols * q, rows * q);
+  for (let y = 0; y < rows; y++) for (let x = 0; x < cols; x++) { g.fillStyle = (x + y) % 2 ? '#111' : '#fff'; g.fillRect(x * q, y * q, q, q); }
+  const t = toTex(c, { repeat: false });
+  t.magFilter = THREE.NearestFilter;
+  return t;
+}
+
+export function signTexture(text) {
+  const [c, g] = canvas(512, 128);
+  const gr = g.createLinearGradient(0, 0, 0, 128);
+  gr.addColorStop(0, '#2c6be0'); gr.addColorStop(1, '#173e91');
+  g.fillStyle = gr; g.fillRect(0, 0, 512, 128);
+  g.strokeStyle = '#0a1a44'; g.lineWidth = 8; g.strokeRect(4, 4, 504, 120);
+  g.fillStyle = '#fff'; g.font = 'italic 900 78px "Trebuchet MS", sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
+  g.lineWidth = 8; g.strokeStyle = '#0a1a44'; g.strokeText(text, 256, 68); g.fillText(text, 256, 68);
+  return toTex(c, { repeat: false });
+}
+
+export function questionTexture() {
+  const [c, g] = canvas(128, 128);
+  const gr = g.createLinearGradient(0, 0, 0, 128);
+  gr.addColorStop(0, '#ffcd38'); gr.addColorStop(1, '#ff9a1f');
+  g.fillStyle = gr; g.fillRect(0, 0, 128, 128);
+  g.strokeStyle = '#fff'; g.lineWidth = 10; g.strokeRect(6, 6, 116, 116);
+  g.fillStyle = '#fff'; g.font = '900 100px "Trebuchet MS", sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
+  g.lineWidth = 6; g.strokeStyle = '#b35a00'; g.strokeText('?', 64, 70); g.fillText('?', 64, 70);
+  return toTex(c, { repeat: false });
+}
+
+export function skyTexture(top = '#2f7fe0', mid = '#7cc4ff', horizon = '#dff3ff') {
+  const [c, g] = canvas(4, 512);
+  const gr = g.createLinearGradient(0, 0, 0, 512);
+  gr.addColorStop(0, top); gr.addColorStop(0.5, mid); gr.addColorStop(1, horizon);
+  g.fillStyle = gr; g.fillRect(0, 0, 4, 512);
+  return toTex(c, { repeat: false });
+}
+
+export function cloudTexture() {
+  const [c, g] = canvas(256, 128);
+  for (const [x, y, r] of [[70, 80, 40], [110, 60, 50], [158, 70, 44], [196, 88, 32], [128, 92, 48]]) {
+    const gr = g.createRadialGradient(x, y, 4, x, y, r);
+    gr.addColorStop(0, 'rgba(255,255,255,1)'); gr.addColorStop(1, 'rgba(255,255,255,0)');
+    g.fillStyle = gr; g.beginPath(); g.arc(x, y, r, 0, 7); g.fill();
+  }
+  return toTex(c, { repeat: false });
+}
+
+export function softShadowTexture() {
+  const [c, g] = canvas(64, 64);
+  const gr = g.createRadialGradient(32, 32, 4, 32, 32, 30);
+  gr.addColorStop(0, 'rgba(0,0,0,.6)'); gr.addColorStop(1, 'rgba(0,0,0,0)');
+  g.fillStyle = gr; g.fillRect(0, 0, 64, 64);
+  return toTex(c, { repeat: false });
+}
+
+export function glowTexture(color = '255,255,255') {
+  const [c, g] = canvas(64, 64);
+  const gr = g.createRadialGradient(32, 32, 2, 32, 32, 32);
+  gr.addColorStop(0, `rgba(${color},1)`); gr.addColorStop(0.4, `rgba(${color},.45)`); gr.addColorStop(1, `rgba(${color},0)`);
+  g.fillStyle = gr; g.fillRect(0, 0, 64, 64);
+  return toTex(c, { repeat: false });
+}

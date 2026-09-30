@@ -1,0 +1,457 @@
+// Host: orquestra menus, rede, simulacao e render.
+import { COLORS, ITEM_LABEL, MAX_PLAYERS, BTN_FIRE, BTN_AWAY } from '/shared/protocol.js';
+import { buildTrack } from '/sim/track.js';
+import { Game } from '/sim/game.js';
+import { CAMERA } from '/sim/camera.js';
+import { makeBrain, think } from '/sim/ai.js';
+import { makeRng } from '/sim/rng.js';
+import testCircuit from '/sim/tracks/testcircuit.js';
+import { HostNet } from './net.js';
+import { UI, qrSvg } from './ui.js';
+import { GameAudio } from './audio.js';
+import { Keyboard } from './kbd.js';
+import { createScene } from './render/scene.js';
+import { buildWorld } from './render/world.js';
+import { Actors } from './render/cars.js';
+import { FX } from './render/fx.js';
+
+const qs = new URLSearchParams(location.search);
+const quality = qs.get('q') === 'low' ? 'low' : 'high';
+const debugEl = document.getElementById('debug');
+if (qs.has('debug')) debugEl.hidden = false;
+
+const CUPS = [
+  { id: 'fast', icon: '🏁', name: 'Fast Cup', desc: 'Condução limpa e precisão. Sem armas: só você, a pista e a câmera.' },
+  { id: 'super', icon: '⚡', name: 'Super Cup', desc: 'Corrida arcade clássica com itens táticos espaçados na pista.' },
+  { id: 'war', icon: '💥', name: 'War Cup', desc: 'Caos total: caixas de item por toda parte. Sobreviva.' },
+];
+const TRACKS = [
+  { id: 'test', icon: '🧪', name: 'Ponte do Rio (teste)', desc: 'Circuito de teste (~1 min por volta): ponte de madeira sobre o rio e um trecho de terra.', def: testCircuit },
+  { icon: '🏙️', name: 'Downtown', desc: 'Em breve.', locked: true },
+  { icon: '🌊', name: 'Water Hill', desc: 'Em breve.', locked: true },
+  { icon: '🏜️', name: 'Death Mountain', desc: 'Em breve.', locked: true },
+  { icon: '🌽', name: 'Farm Jump', desc: 'Em breve.', locked: true },
+];
+
+const ui = new UI();
+const audio = new GameAudio();
+const kbd = new Keyboard();
+const sc = createScene(document.getElementById('gl'), quality);
+const fx = new FX(sc.scene);
+const actors = new Actors(sc.scene, { shadows: sc.shadows });
+let world = null;
+
+const S = {
+  phase: 'splash',
+  code: '',
+  devices: new Map(), // id -> { id, name, connected, steer, fireHeld, fireQueued, away, rtt, sent }
+  bots: new Map(), // color -> { color }
+  kbd: null, // color
+  masterId: -1,
+  cupIdx: 1,
+  trackIdx: 0,
+  ips: [],
+  ipIdx: 0,
+  port: location.port || 80,
+  game: null,
+  brains: new Map(),
+  paused: false,
+  names: new Map(),
+  resultsTimer: 0,
+};
+
+// ---------------------------------------------------------------- jogadores
+const phoneName = (d) => d.name || `Jogador ${d.id + 1}`;
+function usedColors() {
+  const u = new Set(S.devices.keys());
+  for (const c of S.bots.keys()) u.add(c);
+  if (S.kbd !== null) u.add(S.kbd);
+  return u;
+}
+function freeColor() {
+  const u = usedColors();
+  for (let i = MAX_PLAYERS - 1; i >= 0; i--) if (!u.has(i)) return i;
+  return -1;
+}
+function addBot() {
+  const c = freeColor();
+  if (c >= 0) S.bots.set(c, { color: c });
+}
+function removeBot() {
+  const keys = [...S.bots.keys()].sort((a, b) => a - b);
+  if (keys.length) S.bots.delete(keys[0]);
+}
+function slots() {
+  const out = Array(MAX_PLAYERS).fill(null);
+  for (const d of S.devices.values()) out[d.id] = { kind: 'phone', name: phoneName(d), master: d.id === S.masterId, connected: d.connected };
+  for (const c of S.bots.keys()) out[c] = { kind: 'bot', name: 'Bot ' + COLORS[c].name };
+  if (S.kbd !== null) out[S.kbd] = { kind: 'kbd', name: 'Teclado' };
+  return out;
+}
+function participants() {
+  const list = [];
+  slots().forEach((s, i) => {
+    if (!s) return;
+    if (s.kind === 'phone' && !s.connected) return;
+    list.push({ id: i, color: i, name: s.name, isBot: s.kind === 'bot', kind: s.kind });
+  });
+  return list;
+}
+
+// ---------------------------------------------------------------- rede
+const net = new HostNet({
+  onStatus: () => {},
+  onRoom: (code) => { S.code = code; refresh(); },
+  onConnect: (m) => {
+    let d = S.devices.get(m.id);
+    if (!d) { d = { id: m.id, name: '', connected: true, steer: 0, fireHeld: false, fireQueued: false, away: false, rtt: 0, sent: '' }; S.devices.set(m.id, d); }
+    d.connected = true; d.name = m.name || d.name; d.sent = '';
+    if (S.bots.has(m.id)) { S.bots.delete(m.id); addBot(); }
+    if (S.kbd === m.id) { S.kbd = null; const c = freeColor(); if (c >= 0) S.kbd = c; }
+    audio.play('join');
+    refresh();
+  },
+  onDisconnect: (m) => {
+    const d = S.devices.get(m.id);
+    if (!d) return;
+    if (m.gone || S.phase !== 'game') S.devices.delete(m.id);
+    else { d.connected = false; d.steer = 0; }
+    refresh();
+  },
+  onMaster: (id) => { S.masterId = id; refresh(); },
+  onInput: (r) => {
+    const d = S.devices.get(r.id);
+    if (!d) return;
+    d.steer = r.steer;
+    const fire = !!(r.buttons & BTN_FIRE);
+    if (fire && !d.fireHeld) d.fireQueued = true;
+    d.fireHeld = fire;
+    d.away = !!(r.buttons & BTN_AWAY);
+  },
+  onFrom: (id, m) => {
+    const d = S.devices.get(id);
+    if (!d) return;
+    if (m.t === 'menu' && id === S.masterId) nav(m.k, m.i, true);
+    else if (m.t === 'rtt') d.rtt = m.ms;
+    else if (m.t === 'name') { d.name = String(m.name || '').slice(0, 14); refresh(); }
+  },
+});
+net.connect();
+
+const vib = (id, pattern) => { if (S.devices.has(id)) net.sendTo(id, { t: 'vib', p: pattern }); };
+
+function phoneView(id) {
+  const d = S.devices.get(id);
+  const isMaster = id === S.masterId;
+  const base = { t: 'st', color: COLORS[id].hex, cname: COLORS[id].name, name: phoneName(d), master: isMaster };
+  if (S.phase === 'game' && S.game) {
+    const c = S.game.carById(id);
+    if (c) return { ...base, mode: S.paused && isMaster ? 'menu' : c.alive ? 'drive' : 'dead', item: c.item ? ITEM_LABEL[c.item] + '|' + c.item : null, pts: S.game.points.get(id), title: S.paused ? 'Jogo pausado' : '' };
+    return { ...base, mode: 'wait', title: 'Aguardando a próxima partida' };
+  }
+  const titles = { splash: 'Clique na tela principal', lobby: 'Lobby: ◀ ▶ bots · OK escolher copa', cups: 'Escolha a copa', tracks: 'Escolha o circuito', results: 'Fim de jogo: OK volta ao lobby' };
+  return { ...base, mode: isMaster ? 'menu' : 'wait', title: titles[S.phase] || '' };
+}
+function syncPhones() {
+  for (const d of S.devices.values()) {
+    if (!d.connected) continue;
+    const v = JSON.stringify(phoneView(d.id));
+    if (v !== d.sent) { d.sent = v; net.sendTo(d.id, JSON.parse(v)); }
+  }
+}
+setInterval(syncPhones, 120);
+
+// ---------------------------------------------------------------- menus
+async function loadIps() {
+  try {
+    const r = await (await fetch('/api/lan')).json();
+    S.ips = r.ips; S.port = r.port;
+  } catch {}
+  refresh();
+}
+loadIps();
+
+function padUrl() {
+  const local = ['localhost', '127.0.0.1', '[::1]'].includes(location.hostname);
+  if (!S.code) {
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
+    let c = '';
+    for (let i = 0; i < 4; i++) c += chars[Math.floor(Math.random() * chars.length)];
+    S.code = c;
+  }
+  if (!local || location.protocol === 'https:') {
+    const basePath = location.pathname.replace(/\/(host\/)?(index\.html)?$/, '');
+    const cleanBase = basePath.endsWith('/') ? basePath.slice(0, -1) : basePath;
+    return { base: `${location.host}${cleanBase}`, url: `${location.origin}${cleanBase}/pad/?room=${S.code}` };
+  }
+  const host = S.ips[S.ipIdx] ? `${S.ips[S.ipIdx]}:${S.port}` : location.host;
+  return { base: host, url: `http://${host}/pad?room=${S.code}` };
+}
+
+function refresh() {
+  if (S.phase === 'lobby') {
+    const p = padUrl();
+    const m = S.devices.get(S.masterId);
+    ui.lobby({
+      qr: S.code ? qrSvg(p.url) : '', code: S.code || '····', padUrl: `${p.base}/pad`,
+      slots: slots(), bots: S.bots.size, kbd: S.kbd !== null, masterName: m ? phoneName(m) : '',
+      ips: S.ips.length, ipIdx: S.ipIdx,
+    });
+  } else if (S.phase === 'cups') ui.cups(CUPS, S.cupIdx);
+  else if (S.phase === 'tracks') ui.tracks(TRACKS, S.trackIdx);
+  syncPhones();
+}
+
+function goto(phase) {
+  S.phase = phase;
+  refresh();
+}
+
+function nav(k, idx, fromPhone = false) {
+  if (S.phase === 'splash') {
+    if (k === 'ok' || k === 'pick') { audio.init(); goto('lobby'); }
+    return;
+  }
+  audio.init();
+  audio.play('menu');
+  switch (S.phase) {
+    case 'lobby':
+      if (k === 'right') { if (participants().length < MAX_PLAYERS) addBot(); refresh(); }
+      else if (k === 'left') { removeBot(); refresh(); }
+      else if (k === 'ok') goto('cups');
+      break;
+    case 'cups':
+      if (k === 'left') { S.cupIdx = (S.cupIdx + CUPS.length - 1) % CUPS.length; refresh(); }
+      else if (k === 'right') { S.cupIdx = (S.cupIdx + 1) % CUPS.length; refresh(); }
+      else if (k === 'pick') { S.cupIdx = idx; refresh(); }
+      else if (k === 'ok') goto('tracks');
+      else if (k === 'back') goto('lobby');
+      break;
+    case 'tracks':
+      if (k === 'left') { S.trackIdx = (S.trackIdx + TRACKS.length - 1) % TRACKS.length; refresh(); }
+      else if (k === 'right') { S.trackIdx = (S.trackIdx + 1) % TRACKS.length; refresh(); }
+      else if (k === 'pick') { S.trackIdx = idx; refresh(); }
+      else if (k === 'ok') { if (!TRACKS[S.trackIdx].locked) startGame(); }
+      else if (k === 'back') goto('cups');
+      break;
+    case 'game':
+      if (k === 'back' && !S.paused) { S.paused = true; ui.pause(); audio.setEngine(0, false); }
+      else if (S.paused && k === 'ok') { S.paused = false; ui.clear(); }
+      else if (S.paused && k === 'back') quitToLobby();
+      break;
+    case 'results':
+      if (k === 'ok' || k === 'back') quitToLobby();
+      break;
+  }
+  syncPhones();
+}
+ui.nav = nav;
+kbd.onNav = (k, repeat) => { if (S.phase === 'game' && !S.paused && k !== 'back') return; if (!repeat || S.phase !== 'game') nav(k); };
+kbd.onKey = (ch) => {
+  if (S.phase === 'lobby') {
+    if (ch === 'b') { if (participants().length < MAX_PLAYERS) addBot(); refresh(); }
+    else if (ch === 'k') { if (S.kbd !== null) S.kbd = null; else { const c = freeColor(); if (c >= 0) S.kbd = c; } refresh(); }
+    else if (ch === 'i') { S.ipIdx = (S.ipIdx + 1) % Math.max(1, S.ips.length); refresh(); }
+  }
+  if (S.phase === 'game' && ch === 'p') nav('back');
+};
+
+// ---------------------------------------------------------------- partida
+function startGame() {
+  if (participants().length < 2) while (participants().length < 4 && freeColor() >= 0) addBot();
+  const list = participants();
+  const def = TRACKS[S.trackIdx].def;
+  const track = buildTrack(def);
+  const cup = CUPS[S.cupIdx].id;
+  const game = new Game(list, { track, cup, seed: (Math.random() * 1e9) | 0, aspect: sc.size.aspect });
+  S.game = game;
+  S.paused = false;
+  S.names = new Map(list.map((p) => [p.id, p.name]));
+  S.kinds = new Map(list.map((p) => [p.id, p.kind]));
+  const rng = makeRng(game.rng() * 1e9);
+  S.brains = new Map(list.filter((p) => p.isBot).map((p) => [p.id, makeBrain(rng, 0.62 + rng() * 0.35)]));
+  if (world) sc.scene.remove(world.group);
+  world = buildWorld(track, quality);
+  sc.scene.add(world.group);
+  actors.setup(game);
+  ui.clear();
+  ui.initHud(game, S.names);
+  S.phase = 'game';
+  audio.setMusic(true);
+  handleEvents(game.drainEvents());
+  syncPhones();
+}
+
+function quitToLobby() {
+  clearTimeout(S.resultsTimer);
+  audio.setMusic(false);
+  audio.setEngine(0, false);
+  audio.setSqueal(0);
+  ui.bannerClear();
+  ui.clearHud();
+  actors.clear();
+  S.game = null;
+  S.paused = false;
+  for (const d of [...S.devices.values()]) if (!d.connected) S.devices.delete(d.id);
+  for (const d of S.devices.values()) d.sent = '';
+  goto('lobby');
+}
+
+function trafficLight(n) {
+  const on = n === 'go' ? [0, 0, 1] : n >= 3 ? [1, 0, 0] : [1, 1, 0];
+  const lamp = (c, i) => `<i class="${c}${on[i] ? ' on' : ''}"></i>`;
+  return `<div class="tl"><div class="lamps">${lamp('r', 0)}${lamp('y', 1)}${lamp('g', 2)}</div><div class="num">${n === 'go' ? 'VAI!' : n}</div></div>`;
+}
+
+const nameOf = (id) => S.names.get(id) || 'Piloto';
+const hexOf = (id) => COLORS[id].hex;
+
+function handleEvents(events) {
+  const g = S.game;
+  const cam = g.camera;
+  for (const e of events) {
+    switch (e.type) {
+      case 'countdown':
+        world?.gantry.countdown(e.n);
+        ui.banner(trafficLight(e.n), 1100);
+        audio.play('count');
+        break;
+      case 'go':
+        world?.gantry.go();
+        ui.banner(trafficLight('go'), 900);
+        audio.play('go');
+        break;
+      case 'pickup': audio.play('pickup'); vib(e.car, [25]); fx.sparks(e.x, e.z, 6); break;
+      case 'use':
+        audio.play(e.item);
+        if (e.item === 'whomp') { cam.shake = Math.max(cam.shake, 1.5); vib(e.car, [60]); }
+        break;
+      case 'explode':
+        fx.explosion(e.x, e.z, e.kind === 'missile' ? 1.2 : 1);
+        audio.play('explode', e.kind === 'missile' ? 2 : 1);
+        cam.shake = Math.max(cam.shake, 3);
+        break;
+      case 'hit': vib(e.car, [250]); break;
+      case 'whompHit': vib(e.car, [120]); break;
+      case 'wall':
+        fx.sparks(e.x, e.z, 6 + Math.round(e.strength * 8));
+        audio.play('wall', e.strength);
+        cam.shake = Math.max(cam.shake, 0.4 + e.strength);
+        vib(e.car, [30 + Math.round(e.strength * 60)]);
+        break;
+      case 'bump': fx.sparks(e.x, e.z, 4); audio.play('bump', e.strength); vib(e.a, [30]); vib(e.b, [30]); break;
+      case 'alarm': audio.play('alarm'); vib(e.car, [70, 40, 70]); break;
+      case 'fall': fx.splash(e.x, e.z); audio.play('fall'); break;
+      case 'dead': {
+        const why = e.cause === 'fall' ? 'caiu da pista' : 'saiu do enquadramento';
+        ui.killfeed(`${nameOf(e.car)} ${why}`, hexOf(e.car));
+        if (e.cause === 'cut') { fx.explosion(e.x, e.z, 1); audio.play('cut'); cam.shake = Math.max(cam.shake, 2.2); }
+        vib(e.car, [400]);
+        break;
+      }
+      case 'roundEnd': {
+        world?.gantry.off();
+        const d = e.delta[e.survivor];
+        ui.banner(`<div style="position:relative;top:22vh"><div class="mid" style="color:${hexOf(e.survivor)}">${nameOf(e.survivor)} sobreviveu!</div><div class="sub">+${d} pontos</div></div>`, 1100);
+        audio.play('win');
+        vib(e.survivor, [80, 50, 80, 50, 160]);
+        break;
+      }
+      case 'matchEnd': {
+        audio.setMusic(false);
+        audio.play('fanfare');
+        ui.banner(`<div class="mid" style="color:${hexOf(e.winner)}">🏆 ${nameOf(e.winner)} venceu!</div>`, 0);
+        S.resultsTimer = setTimeout(showResults, 2600);
+        vib(e.winner, [100, 60, 100, 60, 400]);
+        break;
+      }
+    }
+  }
+}
+
+function showResults() {
+  const g = S.game;
+  if (!g) return;
+  const rows = g.cars.map((c) => ({ color: c.color, name: nameOf(c.id), points: g.points.get(c.id), prog: c.progress, win: c.id === g.winner }));
+  rows.sort((a, b) => (b.win - a.win) || (b.points - a.points) || (b.prog - a.prog));
+  ui.bannerClear();
+  S.phase = 'results';
+  ui.results(rows, `${rows[0].name} venceu!`, g.endReason);
+  syncPhones();
+}
+
+// ---------------------------------------------------------------- laco principal
+let last = performance.now(), fpsAcc = 0, fpsN = 0, fps = 0;
+const scr = { x: 0, y: 0 };
+
+function frame(now) {
+  requestAnimationFrame(frame);
+  tick(Math.min(0.05, (now - last) / 1000), now);
+  last = now;
+}
+
+function tick(dt, now) {
+  fpsAcc += dt; fpsN++;
+  if (fpsAcc > 0.5) { fps = Math.round(fpsN / fpsAcc); fpsAcc = 0; fpsN = 0; }
+  const g = S.game;
+
+  if (g && S.phase !== 'splash') {
+    if (S.phase === 'game' && !S.paused) {
+      g.camera.aspect = sc.size.aspect;
+      for (const c of g.cars) {
+        const kind = S.kinds.get(c.id);
+        if (kind === 'bot') {
+          if (c.alive && c.near) {
+            const r = think(S.brains.get(c.id), c, g, dt);
+            g.setInput(c.id, r.steer, r.fire);
+          }
+        } else if (kind === 'kbd') {
+          g.setInput(c.id, kbd.steer, kbd.takeFire());
+        } else {
+          const d = S.devices.get(c.id);
+          if (d) {
+            g.setInput(c.id, d.connected && !d.away ? d.steer : 0, d.fireQueued);
+            d.fireQueued = false;
+          }
+        }
+      }
+      g.update(dt);
+      const ev = g.drainEvents();
+      if (ev.length) { handleEvents(ev); syncPhones(); }
+      ambient(g, dt);
+    }
+    sc.frame(g.camera);
+    actors.update(g, now / 1000, dt);
+    world?.update(now / 1000);
+    ui.updateHud(g);
+    ui.updateLabels(g, (x, y, z) => sc.toScreen(x, y, z, scr), g.camera);
+    fx.update(S.paused ? 0 : dt, sc.renderer.domElement.height / (2 * Math.tan((CAMERA.fov * Math.PI) / 360)));
+  }
+  sc.render();
+  if (!debugEl.hidden) {
+    const rt = [...S.devices.values()].map((d) => `${d.id}:${d.rtt}ms${d.away ? '(away)' : ''}`).join(' ');
+    debugEl.textContent = `${fps} fps · fase ${S.phase}${g ? ' · ' + g.state : ''}\n${rt}`;
+  }
+}
+
+/** Efeitos continuos: fumaca, fogo do nitro, motor e guincho. */
+function ambient(g, dt) {
+  let vmax = 0, slip = 0;
+  for (const c of g.cars) {
+    if (!c.alive || c.hidden) continue;
+    vmax = Math.max(vmax, c.speed);
+    slip = Math.max(slip, c.slip);
+    const fx0 = Math.cos(c.h), fz0 = Math.sin(c.h);
+    if (c.boost > 0) fx.fire(c.x - fx0 * 2.6, c.z - fz0 * 2.6, fx0, fz0);
+    if (c.state === 'run' && c.slip > 4 && Math.random() < dt * 40) fx.smoke(c.x - fx0 * 1.5, c.z - fz0 * 1.5, 0.6);
+    if (c.state === 'run' && c.speed > 8 && (c.onVerge || c.surf === 2) && Math.random() < dt * 30) fx.dust(c.x - fx0 * 1.6, c.z - fz0 * 1.6);
+    if (c.state === 'stun' && Math.random() < dt * 40) fx.smoke(c.x, c.z, 1);
+  }
+  audio.setEngine(vmax, g.state === 'RACING');
+  audio.setSqueal(g.state === 'RACING' ? Math.min(1, Math.max(0, slip - 3) / 8) : 0);
+}
+
+requestAnimationFrame(frame);
+ui.splash();
+window.__rw = S; // depuracao
+S.tick = (dt = 1 / 60, n = 1) => { for (let i = 0; i < n; i++) tick(dt, performance.now()); };
