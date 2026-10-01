@@ -44,30 +44,32 @@ export function buildScenery(track, seed = 99) {
       const d = dist(x, z);
       if (d < clear + minD || d > maxD) continue;
       if (hasBridge && dist(x, z, true) < river + 4) continue;
+      if (track.chasmContains(x, z)) continue; // nada dentro do precipicio
       out.push([x, z]);
     }
     return out;
   };
 
-  const trees = spots(300, 2).map(([x, z]) => {
+  const cnt = track.def.scenery || {}; // quantidades editaveis (debug)
+  const trees = spots(cnt.trees ?? 300, 2).map(([x, z]) => {
     const s = 0.8 + rng() * 1.1;
     return { x, z, s, yaw: rng() * 6.28, sy: s * (0.9 + rng() * 0.4), hue: rng(), light: rng(), r: 1.15 * s };
   });
-  const rocks = spots(90, -3).map(([x, z]) => {
+  const rocks = spots(cnt.rocks ?? 90, -3).map(([x, z]) => {
     const s = 0.5 + rng() * 1.6;
     return { x, z, s, yaw: rng() * 6, tone: rng(), r: 1.5 * s };
   });
-  const houses = spots(22, 14, edge + 110).map(([x, z]) => ({
+  const houses = spots(cnt.houses ?? 22, 14, edge + 110).map(([x, z]) => ({
     x, z, yaw: Math.floor(rng() * 4) * (Math.PI / 2), brick: rng() < 0.5, hue: rng(),
   }));
 
   // colisores (circulos) + grade para consulta rapida
   const colliders = [];
-  for (const t of trees) colliders.push({ x: t.x, z: t.z, r: t.r, kind: 'tree' });
-  for (const r of rocks) colliders.push({ x: r.x, z: r.z, r: r.r, kind: 'rock' });
+  for (const t of trees) colliders.push({ x: t.x, z: t.z, r: t.r, kind: 'tree', top: 6 * t.sy });
+  for (const r of rocks) colliders.push({ x: r.x, z: r.z, r: r.r, kind: 'rock', top: 2.2 * r.s });
   for (const h of houses) {
     const c = Math.cos(h.yaw), s = Math.sin(h.yaw);
-    for (const off of [-3.2, 0, 3.2]) colliders.push({ x: h.x + c * off, z: h.z + s * off, r: 4.6, kind: 'house' });
+    for (const off of [-3.2, 0, 3.2]) colliders.push({ x: h.x + c * off, z: h.z + s * off, r: 4.6, kind: 'house', top: 9 });
   }
   const cgrid = new Map();
   const CC = 16;

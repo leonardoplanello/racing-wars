@@ -23,9 +23,9 @@ export const COLORS = [
   { name: 'Rosa', hex: '#ff4fa3' },
 ];
 
-export const ITEMS = ['nitro', 'mine', 'missile', 'whomp'];
-export const ITEM_LABEL = { nitro: 'NITRO', mine: 'MINA', missile: 'MÍSSIL', whomp: 'WHOMP' };
-export const ITEM_ICON = { nitro: '🚀', mine: '💣', missile: '🎯', whomp: '🧲' };
+export const ITEMS = ['nitro', 'mine', 'missile', 'whomp', 'ice'];
+export const ITEM_LABEL = { nitro: 'NITRO', mine: 'MINA', missile: 'MÍSSIL', whomp: 'WHOMP', ice: 'GELO' };
+export const ITEM_ICON = { nitro: '🚀', mine: '💣', missile: '🎯', whomp: '🧲', ice: '❄️' };
 
 /** Codifica o input do celular em 4 bytes: [tipo, steer(int8), botoes, seq]. */
 export function encodeInput(steer, buttons, seq, out = new Uint8Array(4)) {

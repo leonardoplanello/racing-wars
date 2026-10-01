@@ -134,6 +134,9 @@ export class GameAudio {
       case 'nitro': this.tone(200, 900, 0.6, 'sawtooth', 0.25); this.noise(t, 0.6, 1200, 4000, 0.3, 'bandpass'); break;
       case 'mine': this.tone(140, 70, 0.15, 'square', 0.35); break;
       case 'missile': this.noise(t, 0.5, 3000, 600, 0.45, 'bandpass'); this.tone(500, 220, 0.4, 'sawtooth', 0.15); break;
+      case 'ice': this.tone(300, 900, 0.25, 'triangle', 0.3); this.noise(t, 0.35, 5000, 1500, 0.3, 'highpass'); break;
+      case 'iceBurst': this.noise(t, 0.5, 6000, 800, 0.5, 'highpass'); [1800, 2400, 3000].forEach((x, i) => this.tone(x, x * 0.5, 0.25, 'triangle', 0.18, i * 0.04)); break;
+      case 'shatter': this.noise(t, 0.3, 7000, 1500, 0.45, 'highpass'); this.tone(2200, 700, 0.15, 'triangle', 0.2); break;
       case 'whomp': this.tone(180, 30, 0.7, 'sine', 0.8); this.noise(t, 0.5, 900, 80, 0.5); break;
       case 'explode': this.noise(t, arg > 1 ? 1.0 : 0.7, 2200, 60, 0.9); this.tone(110, 30, 0.6, 'sine', 0.8); break;
       case 'wall': this.noise(t, 0.12, 2500, 300, 0.25 + 0.4 * (arg || 0)); break;

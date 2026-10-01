@@ -1,7 +1,7 @@
 // Modelos procedurais: picape 4x4 "de brinquedo" e semaforo de largada.
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
-import { steelTexture, glowTexture } from './textures.js';
+import { steelTexture, glowTexture, iceTexture } from './textures.js';
 
 const std = (color, o = {}) => new THREE.MeshStandardMaterial({ color, roughness: 0.5, metalness: 0.1, ...o });
 const rbox = (w, h, d, r = 0.15) => new RoundedBoxGeometry(w, h, d, 3, Math.min(r, w / 2 - 0.01, h / 2 - 0.01, d / 2 - 0.01));
@@ -39,6 +39,24 @@ function mats() {
   };
   shared.ready = true;
   return shared;
+}
+
+/** Pneu solto (mesmo desenho do pneu da picape; eixo = z local). */
+export function buildWheel() {
+  const m = mats(), G = m.geo;
+  const tire = new THREE.Mesh(G.wheel, m.tire);
+  tire.castShadow = true;
+  tire.add(new THREE.Mesh(G.rim, m.white), new THREE.Mesh(G.hub, m.hubMat));
+  for (let i = 0; i < 6; i++) {
+    const lug = new THREE.Mesh(G.lug, m.tire);
+    const a = (i / 6) * Math.PI * 2;
+    lug.position.set(Math.cos(a) * 0.86, Math.sin(a) * 0.86, 0);
+    lug.rotation.z = a + Math.PI / 2;
+    tire.add(lug);
+  }
+  const g = new THREE.Group();
+  g.add(tire);
+  return g;
 }
 
 /** Picape 4x4. Frente = +x. Retorna {group, wheels:[{pivot,tire,front}], setSteer, spin}. */
@@ -212,11 +230,11 @@ export function buildTruck(hex) {
             o.material = charred;
           }
         });
-        wheels.forEach((w, i) => { w.pivot.rotation.z = (i % 2 ? 1 : -1) * (0.12 + 0.08 * i); w.pivot.position.y -= 0.12; });
+        wheels.forEach((w) => { w.pivot.visible = false; }); // os pneus saem do carro como corpos fisicos (sim)
       } else {
         for (const [o, mat] of orig) o.material = mat;
         orig.clear();
-        wheels.forEach((w) => { w.pivot.rotation.z = 0; w.pivot.position.y = 0.82; });
+        wheels.forEach((w) => { w.pivot.visible = true; w.pivot.rotation.z = 0; w.pivot.position.y = 0.82; });
       }
     },
     setSteer(s) { if (!wrecked) for (const w of wheels) if (w.front) w.pivot.rotation.y = -s * 0.5; },
@@ -311,4 +329,37 @@ export function buildStartGantry(halfSpan) {
     countdown: (n) => set(n >= 3 ? [1, 0, 0] : [1, 1, 0]),
     go: () => set([0, 0, 1]),
   };
+}
+
+/**
+ * Cubo de gelo: bloco facetado (vertices levemente deslocados, sombreamento chapado), casca translucida com
+ * brilho, nucleo leitoso por dentro e arestas claras. `userData.setOpacity(k)` (0..1) escala a transparencia.
+ */
+export function buildIceCube(w = 5.3, h = 4.1, d = 3.7) {
+  const group = new THREE.Group();
+  const geo = new THREE.BoxGeometry(w, h, d, 3, 3, 3);
+  // desloca os vertices de forma deterministica (mesma posicao => mesmo deslocamento, sem abrir buracos)
+  const pos = geo.attributes.position;
+  const hash = (x, y, z) => { const n = Math.sin(x * 12.9898 + y * 78.233 + z * 37.719) * 43758.5453; return n - Math.floor(n); };
+  for (let i = 0; i < pos.count; i++) {
+    const x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i);
+    const e = (Math.abs(x) > w / 2 - 0.01) + (Math.abs(y) > h / 2 - 0.01) + (Math.abs(z) > d / 2 - 0.01);
+    const k = e >= 3 ? 0.5 : 0.16; // cantos mais chanfrados, faces com leve ondulacao
+    const sh = 1 - 0.06 * e;
+    pos.setXYZ(i, x * sh + (hash(x, y, z) - 0.5) * k, y * sh + (hash(y, z, x) - 0.5) * k, z * sh + (hash(z, x, y) - 0.5) * k);
+  }
+  geo.computeVertexNormals();
+  const shell = new THREE.MeshPhysicalMaterial({
+    color: 0xcfefff, map: iceTexture(), transparent: true, opacity: 0.55, roughness: 0.08, metalness: 0,
+    clearcoat: 1, clearcoatRoughness: 0.05, emissive: 0x2a7fb5, emissiveIntensity: 0.4, flatShading: true, depthWrite: false,
+  });
+  const core = new THREE.MeshStandardMaterial({ color: 0xf2fbff, transparent: true, opacity: 0.35, roughness: 0.6, emissive: 0x9fdcff, emissiveIntensity: 0.25, depthWrite: false });
+  const edge = new THREE.LineBasicMaterial({ color: 0xf2fcff, transparent: true, opacity: 0.85 });
+  const outer = new THREE.Mesh(geo, shell);
+  const inner = new THREE.Mesh(new THREE.OctahedronGeometry(1, 0).scale(w * 0.3, h * 0.32, d * 0.3), core);
+  inner.rotation.y = 0.6;
+  const lines = new THREE.LineSegments(new THREE.EdgesGeometry(geo, 25), edge);
+  group.add(inner, outer, lines);
+  group.userData.setOpacity = (k) => { shell.opacity = 0.55 * k; core.opacity = 0.35 * k; edge.opacity = 0.85 * k; };
+  return group;
 }

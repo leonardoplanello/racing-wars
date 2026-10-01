@@ -7,6 +7,7 @@ export class Keyboard {
     this.onNav = null; // (k) => void
     this.onKey = null; // (letra) => void
     addEventListener('keydown', (e) => {
+      if (e.target?.matches?.('input, textarea, select')) return; // digitando no painel de debug
       if (e.repeat) {
         if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') this.onNav?.(e.key === 'ArrowLeft' ? 'left' : 'right', true);
         return;

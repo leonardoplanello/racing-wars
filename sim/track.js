@@ -89,12 +89,37 @@ export function buildTrack(def, spacing = 1) {
       ELEV[i] = deck * (1 - t * t * (3 - 2 * t));
     }
   }
+  // colinas/rampas: subida suave de `rise` unidades, topo plano e descida suave (`fall`) ou labio abrupto (fall = 0)
+  const RAILS = new Uint8Array(N).fill(1);
+  const smooth = (t) => t * t * (3 - 2 * t);
+  const Ltot = N * ds;
+  for (const h of def.hills || []) {
+    const rise = h.rise ?? 24, fall = h.fall ?? 24;
+    const a = h.from * Ltot, flat = ((((h.to - h.from) % 1) + 1) % 1) * Ltot;
+    const span = rise + flat + fall;
+    for (let i = 0; i < N; i++) {
+      const u = ((((i * ds - (a - rise)) % Ltot) + Ltot) % Ltot);
+      if (u > span) continue;
+      let k;
+      if (u < rise) k = fall > 0 ? smooth(u / rise) : (u / rise) * (u / rise); // rampa de salto: curva que empina ate o labio
+      else if (u < rise + flat) k = 1;
+      else k = fall > 0 ? 1 - smooth((u - rise - flat) / fall) : 0;
+      ELEV[i] = Math.max(ELEV[i], h.height * k);
+      if (h.rails === false) RAILS[i] = 0;
+    }
+  }
+  // precipicios: fosso fundo ao lado da pista (side: 1 direita, -1 esquerda, 0 os dois); sem cerca desse lado
+  const CH = new Int8Array(N), CHW = new Float32Array(N);
+  for (const c of def.chasms || []) {
+    const sv = c.side === 0 ? 2 : c.side === 1 ? 1 : -1;
+    mark(c.from, c.to, (i) => { CH[i] = CH[i] && CH[i] !== sv ? 2 : sv; CHW[i] = Math.max(CHW[i], c.width ?? 60); });
+  }
   const halfWidth = def.halfWidth ?? 10;
   const HW = new Float64Array(N).fill(halfWidth);
 
   const track = {
     def, name: def.name, N, ds, length: N * ds,
-    X, Z, TX, TZ, NX, NZ, SURFACE, HW, BRIDGE, ELEV,
+    X, Z, TX, TZ, NX, NZ, SURFACE, HW, BRIDGE, ELEV, RAILS, CH, CHW,
     halfWidth, verge: def.verge ?? 0, boundary: def.boundary || 'wall',
     theme: def.theme || {},
     newNear: () => ({ idx: -1, s: 0, d: 0, nx: 0, nz: 1, tx: 1, tz: 0, cx: 0, cz: 0, dist: 0 }),
@@ -158,6 +183,59 @@ export function buildTrack(def, spacing = 1) {
       const i = Math.floor(w) % N, j = (i + 1) % N, f = w - Math.floor(w);
       return ELEV[i] + (ELEV[j] - ELEV[i]) * f;
     },
+    /** Declive do tabuleiro (altura por unidade de s) em s. */
+    slopeAt(s) { return (this.elevAt(s + 0.75) - this.elevAt(s - 0.75)) / 1.5; },
+    /**
+     * Chao sob (x,z): tabuleiro (ELEV) dentro da faixa da pista, terreno (0) fora dela.
+     * `out` = {y, nx, ny, nz} (normal da superficie). `hint` = indice proximo da pista (ou -1).
+     */
+    groundAt(x, z, hint, out = { y: 0, nx: 0, ny: 1, nz: 0 }) {
+      const nr = this._gn || (this._gn = this.newNear());
+      this.nearest(x, z, hint ?? -1, nr);
+      return this.groundFromNear(nr, out);
+    },
+    /** Igual a groundAt, mas a partir de um `near` ja calculado. */
+    groundFromNear(nr, out) {
+      if (Math.abs(nr.d) <= this.halfWidth + this.verge) {
+        out.y = this.elevAt(nr.s);
+        const e = this.slopeAt(nr.s);
+        const l = Math.hypot(e, 1);
+        out.nx = (-e * nr.tx) / l; out.nz = (-e * nr.tz) / l; out.ny = 1 / l;
+      } else {
+        out.y = 0; out.nx = 0; out.ny = 1; out.nz = 0;
+      }
+      return out;
+    },
+    /**
+     * Falesia: um ponto (x,z) com altura y abaixo do tabuleiro e a menos de `R` da borda dele bate na lateral
+     * da area alta. Devolve true e preenche out = {pen, nx, nz} (normal do ponto para o obstaculo).
+     */
+    cliffAt(x, z, y, R, hint, out) {
+      const nr = this._cn || (this._cn = this.newNear());
+      this.nearest(x, z, hint ?? -1, nr);
+      const lim = this.halfWidth + this.verge + R, ad = Math.abs(nr.d);
+      if (ad >= lim || ELEV[nr.idx] - y <= 0.7) return false;
+      const sg = nr.d >= 0 ? 1 : -1;
+      out.pen = lim - ad; out.nx = -sg * nr.nx; out.nz = -sg * nr.nz;
+      return true;
+    },
+    /** O ponto (dado seu `near`) esta dentro de um precipicio ao lado da pista? */
+    chasmAt(near) {
+      const c = CH[near.idx];
+      if (!c) return false;
+      const side = near.d > 0 ? 1 : -1;
+      if (c !== 2 && c !== side) return false;
+      const a = Math.abs(near.d), edge = this.halfWidth + this.verge;
+      return a > edge + 0.3 && a < edge + CHW[near.idx];
+    },
+    hasChasm: CH.some((v) => v !== 0),
+    /** (x,z) cai dentro de algum precipicio? (busca global; so para cenario) */
+    chasmContains(x, z) {
+      if (!this.hasChasm) return false;
+      return this.chasmAt(this.nearest(x, z, -1, this._cc || (this._cc = this.newNear())));
+    },
+    /** A pista tem trechos acima do chao (rampas, plateau, ponte)? */
+    hasElev: ELEV.some((v) => v > 0.05),
     wallStyle(i) { return BRIDGE[i] ? 'truss' : 'fence'; },
     /** Muro solido neste trecho? Em pistas com `openLand`, so a ponte tem muro; em terra da para sair. */
     hardWall(i) { return def.openLand ? BRIDGE[i] === 1 : true; },

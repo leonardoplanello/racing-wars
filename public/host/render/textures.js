@@ -340,3 +340,28 @@ export function starburstTexture() {
   g.fillStyle = core; g.beginPath(); g.arc(0, 0, 64, 0, 7); g.fill();
   return toTex(c, { repeat: false });
 }
+
+/** Gelo: azul-claro com veios brancos, rachaduras e bolhas (emenda nas bordas). */
+export function iceTexture() {
+  const rng = makeRng(77);
+  const [c, g] = canvas(256, 256);
+  const gr = g.createLinearGradient(0, 0, 256, 256);
+  gr.addColorStop(0, '#bfeaff'); gr.addColorStop(0.5, '#e4f7ff'); gr.addColorStop(1, '#a8dcf7');
+  g.fillStyle = gr; g.fillRect(0, 0, 256, 256);
+  for (let i = 0; i < 14; i++) {
+    const x = rng() * 256, y = rng() * 256, r = 20 + rng() * 50;
+    const rg = g.createRadialGradient(x, y, 0, x, y, r);
+    rg.addColorStop(0, 'rgba(255,255,255,.55)'); rg.addColorStop(1, 'rgba(255,255,255,0)');
+    g.fillStyle = rg; g.fillRect(x - r, y - r, r * 2, r * 2);
+  }
+  g.strokeStyle = 'rgba(255,255,255,.8)'; g.lineWidth = 1.5;
+  for (let i = 0; i < 9; i++) {
+    let x = rng() * 256, y = rng() * 256;
+    g.beginPath(); g.moveTo(x, y);
+    for (let k = 0; k < 5; k++) { x += (rng() - 0.5) * 60; y += (rng() - 0.3) * 40; g.lineTo(x, y); }
+    g.stroke();
+  }
+  g.fillStyle = 'rgba(255,255,255,.7)';
+  for (let i = 0; i < 30; i++) { g.beginPath(); g.arc(rng() * 256, rng() * 256, 0.8 + rng() * 2.2, 0, 6.283); g.fill(); }
+  return toTex(c);
+}

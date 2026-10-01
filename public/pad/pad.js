@@ -71,7 +71,7 @@ function applyState(m) {
   if (m.mode === 'drive') {
     $('drive').hidden = false; $('menu').hidden = true; $('msg').hidden = true;
     const [label, id] = (m.item || '').split('|');
-    if (id === 'mine') $('ico').innerHTML = '<span class="mine-ico"></span>'; else $('ico').textContent = { nitro: '🚀', missile: '🎯', whomp: '🧲' }[id] || '';
+    if (id === 'mine') $('ico').innerHTML = '<span class="mine-ico"></span>'; else $('ico').textContent = { nitro: '🚀', missile: '🎯', whomp: '🧲', ice: '❄️' }[id] || '';
     $('itl').textContent = label || '';
     $('firehint').textContent = m.item ? 'TOQUE PARA USAR' : 'SEM ITEM';
     $('act').style.opacity = m.item ? 1 : 0.6;
@@ -126,14 +126,14 @@ function sendInput() {
   S.ws.send(encodeInput(S.rev ? 0 : S.steer, buttons, S.seq++, buf));
 }
 
-// volante digital suavizado: segurar uma seta leva a +-1 em ~0,25 s
+// volante digital suavizado: segurar uma seta leva a +-1 em ~0,05 s
 let lastTick = performance.now();
 function steerTick() {
   const now = performance.now(), dt = Math.min(0.1, (now - lastTick) / 1000);
   lastTick = now;
   const held = S.held || { L: false, R: false };
   const want = S.rev ? 0 : (held.R ? 1 : 0) - (held.L ? 1 : 0);
-  const rate = want === 0 ? 14 : 9; // volante rapido: vira com facilidade
+  const rate = want === 0 ? 28 : 22; // volante rapido: vira com facilidade
   S.steer += Math.max(-rate * dt, Math.min(rate * dt, want - S.steer));
   if (Math.abs(S.steer) < 0.01) S.steer = 0;
 }

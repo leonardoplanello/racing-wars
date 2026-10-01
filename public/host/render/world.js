@@ -197,6 +197,28 @@ export function buildWorld(track, quality = 'high') {
     }
     if (!BRIDGE.some((v) => v)) bridgeRuns.length = 0;
   }
+  // precipicios: faixas ao lado da pista, da borda ate `width`; viram furos no terreno (poligonos)
+  const chasmPolys = [];
+  if (track.hasChasm) {
+    for (const sg of [-1, 1]) {
+      let run = [];
+      const flush = () => {
+        if (run.length > 1) {
+          const pick = run.filter((_, j) => j % 3 === 0 || j === run.length - 1);
+          const pts = [];
+          for (const k of pick) pts.push([X[k] + NX[k] * sg * (edge + 0.3), Z[k] + NZ[k] * sg * (edge + 0.3)]);
+          for (const k of pick.slice().reverse()) pts.push([X[k] + NX[k] * sg * (edge + track.CHW[k]), Z[k] + NZ[k] * sg * (edge + track.CHW[k])]);
+          chasmPolys.push(pts);
+        }
+        run = [];
+      };
+      for (let i = 0; i < N; i++) {
+        const c = track.CH[i];
+        if (c === sg || c === 2) run.push(i); else flush();
+      }
+      flush();
+    }
+  }
   const waterTex = TX.waterTexture();
   const holes = [];
   const poly = [];
@@ -220,6 +242,12 @@ export function buildWorld(track, quality = 'high') {
       h.closePath();
       shape.holes.push(h);
       holes.push(pts);
+    }
+    for (const pts of chasmPolys) {
+      const h = new THREE.Path();
+      pts.forEach(([x, z], i) => (i ? h.lineTo(x, -z) : h.moveTo(x, -z)));
+      h.closePath();
+      shape.holes.push(h);
     }
     const gg = new THREE.ShapeGeometry(shape);
     gg.rotateX(-Math.PI / 2);
@@ -260,7 +288,33 @@ export function buildWorld(track, quality = 'high') {
       group.add(new THREE.Mesh(bg, skirtDirt));
     }
   }
-  if (!poly.length) {
+  // paredes de rocha e fundo escuro dos precipicios
+  {
+    const DEPTH = 80;
+    const wallMat = new THREE.MeshStandardMaterial({ map: TX.dirtTexture(), color: 0x8a6a48, roughness: 1, side: THREE.DoubleSide });
+    for (const pts of chasmPolys) {
+      const bp = [], bi = [], buv = [];
+      pts.forEach(([x, z], i) => {
+        bp.push(x, -0.02, z, x, -DEPTH, z);
+        buv.push(i * 0.5, 0, i * 0.5, DEPTH / 6);
+        if (i) bi.push(i * 2 - 2, i * 2 - 1, i * 2, i * 2 - 1, i * 2 + 1, i * 2);
+      });
+      const n = pts.length;
+      bi.push(n * 2 - 2, n * 2 - 1, 0, n * 2 - 1, 1, 0);
+      const bg = new THREE.BufferGeometry();
+      bg.setAttribute('position', new THREE.Float32BufferAttribute(bp, 3));
+      bg.setAttribute('uv', new THREE.Float32BufferAttribute(buv, 2));
+      bg.setIndex(bi);
+      bg.computeVertexNormals();
+      group.add(new THREE.Mesh(bg, wallMat));
+      const fg = new THREE.ShapeGeometry(new THREE.Shape(pts.map(([x, z]) => new THREE.Vector2(x, -z))));
+      fg.rotateX(-Math.PI / 2);
+      const floor = new THREE.Mesh(fg, new THREE.MeshBasicMaterial({ color: 0x07080c }));
+      floor.position.y = -DEPTH;
+      group.add(floor);
+    }
+  }
+  if (!poly.length && !chasmPolys.length) {
     const gg = new THREE.PlaneGeometry(2800, 2800).rotateX(-Math.PI / 2);
     const grassT = TX.grassTexture();
     grassT.repeat.set(2800 / 9, 2800 / 9);
@@ -315,7 +369,7 @@ export function buildWorld(track, quality = 'high') {
             const dl = Math.hypot(len, H - 0.5);
             diags.push(matrix((x0 + x1) / 2, y0 + H / 2 + 0.25, (z0 + z1) / 2, yaw, dl, 0.5, 0.5, flip * Math.atan2(H - 0.5, len)));
             flip = -flip;
-          } else {
+          } else if (track.RAILS[k0] && !(track.CH[k0] === sg || track.CH[k0] === 2)) {
             const bk = { x: (x0 + x1) / 2, z: (z0 + z1) / 2, y: y0, kind: 'iron', broken: false, parts: [['lposts', lposts.length], ['lrails', lrails.length], ['lrails', lrails.length + 1]] };
             lposts.push(matrix(x0, y0 + 1.8, z0, yaw, 0.38, 3.6, 0.38));
             lrails.push(matrix((x0 + x1) / 2, y0 + 3.0, (z0 + z1) / 2, yaw, len, 0.16, 0.16));
@@ -391,10 +445,12 @@ export function buildWorld(track, quality = 'high') {
     let cx = 0, cz = 0;
     for (let i = 0; i < N; i += 8) { cx += X[i]; cz += Z[i]; }
     cx /= Math.ceil(N / 8); cz /= Math.ceil(N / 8);
+    let span = 0; // distancia do ponto mais longe da pista ao centro: as montanhas ficam alem disso
+    for (let i = 0; i < N; i += 4) span = Math.max(span, Math.hypot(X[i] - cx, Z[i] - cz));
     const mats = [];
     const peaks = [];
     for (let i = 0; i < (low ? 8 : 16); i++) {
-      const a = (i / (low ? 8 : 16)) * Math.PI * 2 + rng() * 0.3, r = 520 + rng() * 120;
+      const a = (i / (low ? 8 : 16)) * Math.PI * 2 + rng() * 0.3, r = Math.max(520, span + 300) + rng() * 140;
       const h = 90 + rng() * 120, w = 110 + rng() * 80;
       peaks.push([cx + Math.cos(a) * r, cz + Math.sin(a) * r, h, w]);
     }
@@ -495,6 +551,7 @@ function addScenery(group, track, { rng, low, bridgeRuns, W, edge, breakables, m
       const d = dist(x, z);
       if (d < clear + minD || d > maxD) continue;
       if (bridgeRuns.length && dist(x, z, true) < W + 4) continue;
+      if (track.chasmContains(x, z)) continue;
       out.push([x, z]);
     }
     return out;
@@ -525,13 +582,11 @@ function addScenery(group, track, { rng, low, bridgeRuns, W, edge, breakables, m
 
   // palmeiras
   {
-    const parts = [colored(new THREE.CylinderGeometry(0.35, 0.6, 9, 6).translate(0, 4.5, 0), 0x9a6a3a)];
-    for (let i = 0; i < 7; i++) {
-      const frond = new THREE.ConeGeometry(0.9, 6.5, 4).rotateZ(Math.PI / 2 + 0.55).translate(3.2, 9.3, 0);
-      frond.scale(1, 0.25, 1);
-      frond.rotateY((i / 7) * Math.PI * 2);
-      parts.push(colored(frond, 0x2f9e3f));
-    }
+    // tronco com copa redonda pequena (sem folhas triangulares)
+    const parts = [
+      colored(new THREE.CylinderGeometry(0.35, 0.6, 9, 6).translate(0, 4.5, 0), 0x9a6a3a),
+      colored(new THREE.IcosahedronGeometry(2.3, 1).translate(0, 9.8, 0), 0x2f9e3f),
+    ];
     const palmG = mergeGeometries(parts);
     const palms = spots(Math.round(70 * f), 0, edge + 60);
     const pm = new THREE.InstancedMesh(palmG, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.8, flatShading: true, side: THREE.DoubleSide }), palms.length);
@@ -579,6 +634,7 @@ function addScenery(group, track, { rng, low, bridgeRuns, W, edge, breakables, m
       const x = X[i] + NX[i] * o + (rng() - 0.5) * 6, z = Z[i] + NZ[i] * o + (rng() - 0.5) * 6;
       if (dist(x, z) < edge + 2.2) continue;
       if (bridgeRuns.length && dist(x, z, true) < W + 2) continue;
+      if (track.chasmContains(x, z)) continue;
       tufts.push([x, z]);
     }
     const im = new THREE.InstancedMesh(cross, mat, tufts.length);

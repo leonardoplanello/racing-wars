@@ -14,6 +14,9 @@ export class Debris {
     scene.add(this.mesh);
     this.p = Array.from({ length: MAX }, () => ({ life: 0 }));
     this.next = 0;
+    this.probe = null; // (x,z,out{y,pit}) => chao sob a peca; pit = precipicio/rio (cai e some)
+    this.frame = 0;
+    this.pg = { y: 0, pit: false };
     this.m = new THREE.Matrix4();
     this.q = new THREE.Quaternion();
     this.e = new THREE.Euler();
@@ -37,6 +40,7 @@ export class Debris {
     p.wx = o.wx ?? rnd(-9, 9); p.wy = o.wy ?? rnd(-9, 9); p.wz = o.wz ?? rnd(-9, 9);
     p.sx = o.sx; p.sy = o.sy; p.sz = o.sz;
     p.gy = o.gy ?? 0;
+    p.pit = false;
     this.mesh.setColorAt(this.p.indexOf(p), this.col.setHex(o.color));
     this.mesh.instanceColor.needsUpdate = true;
   }
@@ -70,25 +74,41 @@ export class Debris {
   }
 
   /** Explosao de carro: portas, para-choques, rodas e cacos queimados em todas as direcoes. */
-  carBlast(x, z, color, vx = 0, vz = 0, ground = 0, scale = 1) {
+  carBlast(x, z, color, vx = 0, vz = 0, ground = 0, scale = 1, nx = 0, nz = 0) {
+    // as pecas saem para longe do epicentro (nx,nz = direcao do empurrao) e herdam a velocidade real do carro
+    const base = nx || nz ? Math.atan2(nz, nx) : null;
     const parts = [
       [0.9, 0.18, 1.6, color], [0.9, 0.18, 1.6, color], [0.5, 0.5, 2.0, 0x1b1d24], [0.9, 0.9, 0.5, 0x15161b], [0.9, 0.9, 0.5, 0x15161b],
       [1.2, 0.2, 1.2, color], [0.4, 0.4, 0.4, 0x23262e], [0.5, 0.3, 0.8, 0x888f9c],
     ];
     for (let i = 0; i < 16; i++) {
       const [sx, sy, sz, c] = parts[i % parts.length];
-      const a = Math.random() * 6.283, s = rnd(5, 18) * scale;
+      const a = base === null ? Math.random() * 6.283 : base + rnd(-1.4, 1.4), s = rnd(5, 18) * scale;
       const k = Math.random() < 0.4 ? 0.5 : 1;
       this.piece({
         x: x + Math.cos(a) * 0.6, y: ground + rnd(0.6, 1.8), z: z + Math.sin(a) * 0.6,
-        vx: vx * 0.4 + Math.cos(a) * s, vz: vz * 0.4 + Math.sin(a) * s, vy: rnd(7, 17) * scale,
+        vx: vx * 0.8 + Math.cos(a) * s, vz: vz * 0.8 + Math.sin(a) * s, vy: rnd(7, 17) * scale,
         sx: sx * k, sy: sy * k, sz: sz * k, color: c, gy: ground, life: rnd(2.5, 4),
+      });
+    }
+  }
+
+  /** O cubo de gelo quebra: cacos azul-claros na direcao do deslize. */
+  iceShards(x, z, vx = 0, vz = 0, ground = 0) {
+    const pal = [0xcff1ff, 0x9fe0ff, 0x7fd0ff, 0xeaf9ff];
+    for (let i = 0; i < 18; i++) {
+      const a = Math.random() * 6.283, s = rnd(2, 9), k = rnd(0.35, 0.9);
+      this.piece({
+        x: x + Math.cos(a) * 1.2, y: ground + rnd(0.4, 2.8), z: z + Math.sin(a) * 1.2,
+        vx: vx * 0.5 + Math.cos(a) * s, vz: vz * 0.5 + Math.sin(a) * s, vy: rnd(3, 10),
+        sx: k * rnd(0.7, 1.4), sy: k * rnd(0.5, 1), sz: k * rnd(0.7, 1.4), color: pal[i % pal.length], gy: ground, life: rnd(1.4, 2.4),
       });
     }
   }
 
   update(dt) {
     const { m, q, e, v, s } = this;
+    this.frame++;
     for (let i = 0; i < MAX; i++) {
       const p = this.p[i];
       if (p.life <= 0) {
@@ -99,7 +119,13 @@ export class Debris {
       p.vy -= 28 * dt;
       p.x += p.vx * dt; p.y += p.vy * dt; p.z += p.vz * dt;
       p.rx += p.wx * dt; p.ry += p.wy * dt; p.rz += p.wz * dt;
-      const floor = p.gy + Math.min(p.sx, p.sy, p.sz) * 0.5;
+      // o chao e relido (a cada 3 quadros por peca): fora do tabuleiro cai para o terreno; sobre precipicio/rio cai e some
+      if (this.probe && (this.frame + i) % 3 === 0) {
+        this.probe(p.x, p.z, this.pg);
+        p.gy = this.pg.y; p.pit = this.pg.pit;
+      }
+      if (p.pit) { if (p.y < -8) p.life = Math.min(p.life, 0.3); }
+      const floor = p.pit ? -1e9 : p.gy + Math.min(p.sx, p.sy, p.sz) * 0.5;
       if (p.y < floor) {
         p.y = floor;
         if (p.vy < -1.5) p.vy = -p.vy * 0.32; else p.vy = 0;

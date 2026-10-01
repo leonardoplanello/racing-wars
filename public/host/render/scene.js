@@ -34,6 +34,7 @@ export function createScene(canvas, quality = 'high') {
 
   const camera = new THREE.PerspectiveCamera(CAMERA.fov, 16 / 9, 0.5, 1400);
   const size = { w: 1, h: 1, aspect: 16 / 9 };
+  const shakeV = { x: 0, y: 0, z: 0 };
 
   function resize() {
     const w = window.innerWidth, h = window.innerHeight;
@@ -48,20 +49,20 @@ export function createScene(canvas, quality = 'high') {
   resize();
   window.addEventListener('resize', resize);
 
-  const cp = Math.cos(CAMERA.pitch), sp = Math.sin(CAMERA.pitch);
   /** Posiciona a camera Three a partir da ChaseCamera da simulacao. */
   function frame(cam) {
     camera.fov = CAMERA.fov;
     camera.aspect = size.aspect;
     camera.updateProjectionMatrix();
-    const sx = (Math.random() - 0.5) * cam.shake, sy = (Math.random() - 0.5) * cam.shake * 0.6, sz = (Math.random() - 0.5) * cam.shake;
-    camera.position.set(cam.x + sx, cam.y + sy, cam.z + sz);
+    const sk = cam.shakeOffset(shakeV);
+    camera.position.set(cam.x + sk.x, cam.y + sk.y, cam.z + sk.z);
+    const cp = Math.cos(CAMERA.pitch), sp = Math.sin(CAMERA.pitch);
     const fx = Math.cos(cam.yaw) * cp, fz = Math.sin(cam.yaw) * cp;
     camera.lookAt(camera.position.x + fx * 50, camera.position.y - sp * 50, camera.position.z + fz * 50);
     camera.updateMatrixWorld();
     // sombra e luz seguem o pelotao
-    sun.target.position.set(cam.ax, 0, cam.az);
-    sun.position.set(cam.ax - 45, 90, cam.az + 30);
+    sun.target.position.set(cam.ax, cam.ay, cam.az);
+    sun.position.set(cam.ax - 45, cam.ay + 90, cam.az + 30);
     sun.target.updateMatrixWorld();
   }
 

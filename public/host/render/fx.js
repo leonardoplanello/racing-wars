@@ -69,19 +69,19 @@ export class FX {
     for (let i = 0; i < 8; i++) this.emit({ x, z, y: y * 0.5, vx: dx * speed * 0.3 + (Math.random() - 0.5) * 3, vz: dz * speed * 0.3 + (Math.random() - 0.5) * 3, vy: 1 + Math.random() * 2, life: 0.8, s0: 1.6, s1: 4.4, c0: [0.72, 0.64, 0.5], a0: 0.5, a1: 0, drag: 2.2 });
   }
   /** Folhas e galhos soltos por uma arvore atingida; `rock` solta lascas de pedra. */
-  leaves(x, z, strength = 0.5, rock = false) {
+  leaves(x, z, strength = 0.5, rock = false, y0 = 0) {
     const n = Math.round(8 + 14 * strength);
     for (let i = 0; i < n; i++) {
       const a = Math.random() * 6.283, s = 2 + Math.random() * 7 * (0.5 + strength);
       const c = rock ? [0.62, 0.58, 0.52] : Math.random() < 0.5 ? [0.35, 0.72, 0.25] : [0.55, 0.82, 0.3];
-      this.emit({ x, z, y: rock ? 1 : 3 + Math.random() * 3, vx: Math.cos(a) * s, vz: Math.sin(a) * s, vy: rock ? 3 + Math.random() * 6 : 1 + Math.random() * 3, g: rock ? 24 : 5, life: rock ? 0.7 : 1 + Math.random() * 0.9, s0: rock ? 0.6 : 0.9, s1: rock ? 0.2 : 0.5, c0: c, a0: 1, a1: 0.2, drag: rock ? 0.6 : 2 });
+      this.emit({ x, z, y: y0 + (rock ? 1 : 3 + Math.random() * 3), vx: Math.cos(a) * s, vz: Math.sin(a) * s, vy: rock ? 3 + Math.random() * 6 : 1 + Math.random() * 3, g: rock ? 24 : 5, life: rock ? 0.7 : 1 + Math.random() * 0.9, s0: rock ? 0.6 : 0.9, s1: rock ? 0.2 : 0.5, c0: c, a0: 1, a1: 0.2, drag: rock ? 0.6 : 2 });
     }
   }
   /** Arco eletrico (whomp): faiscas azuis em arco em volta do carro. */
-  arcs(x, z, n = 16) {
+  arcs(x, z, n = 16, y0 = 0) {
     for (let i = 0; i < n; i++) {
       const a = Math.random() * 6.283, r = Math.random() * 1.8;
-      this.emit({ x: x + Math.cos(a) * r, z: z + Math.sin(a) * r, y: 0.8 + Math.random() * 2, vx: Math.cos(a) * 9, vz: Math.sin(a) * 9, vy: 3 + Math.random() * 7, g: 16, life: 0.25 + Math.random() * 0.3, s0: 0.9, s1: 0.2, c0: [0.7, 0.9, 1], c1: [0.25, 0.55, 1], a0: 1, a1: 0 });
+      this.emit({ x: x + Math.cos(a) * r, z: z + Math.sin(a) * r, y: y0 + 0.8 + Math.random() * 2, vx: Math.cos(a) * 9, vz: Math.sin(a) * 9, vy: 3 + Math.random() * 7, g: 16, life: 0.25 + Math.random() * 0.3, s0: 0.9, s1: 0.2, c0: [0.7, 0.9, 1], c1: [0.25, 0.55, 1], a0: 1, a1: 0 });
     }
   }
 
@@ -99,19 +99,19 @@ export class FX {
     p.a0 = o.a0 ?? 1; p.a1 = o.a1 ?? 0;
   }
 
-  smoke(x, z, intensity = 1) {
-    this.emit({ x, z, y: 0.8, vx: (Math.random() - 0.5) * 2, vz: (Math.random() - 0.5) * 2, vy: 1.5, life: 0.7 * intensity + 0.2, s0: 1.4, s1: 4.2, c0: [0.75, 0.75, 0.78], a0: 0.5, a1: 0, drag: 2 });
+  smoke(x, z, intensity = 1, y0 = 0) {
+    this.emit({ x, z, y: y0 + 0.8, vx: (Math.random() - 0.5) * 2, vz: (Math.random() - 0.5) * 2, vy: 1.5, life: 0.7 * intensity + 0.2, s0: 1.4, s1: 4.2, c0: [0.75, 0.75, 0.78], a0: 0.5, a1: 0, drag: 2 });
   }
-  dust(x, z, color = [0.7, 0.6, 0.45]) {
-    this.emit({ x, z, y: 0.5, vx: (Math.random() - 0.5) * 4, vz: (Math.random() - 0.5) * 4, vy: 1, life: 0.6, s0: 1.2, s1: 3.6, c0: color, a0: 0.55, a1: 0, drag: 2.5 });
+  dust(x, z, color = [0.7, 0.6, 0.45], y0 = 0) {
+    this.emit({ x, z, y: y0 + 0.5, vx: (Math.random() - 0.5) * 4, vz: (Math.random() - 0.5) * 4, vy: 1, life: 0.6, s0: 1.2, s1: 3.6, c0: color, a0: 0.55, a1: 0, drag: 2.5 });
   }
-  fire(x, z, dx, dz) {
-    this.emit({ x, z, y: 1.1, vx: dx * -8 + (Math.random() - 0.5) * 3, vz: dz * -8 + (Math.random() - 0.5) * 3, vy: 0.5, life: 0.35, s0: 2.2, s1: 0.4, c0: [1, 0.85, 0.2], c1: [1, 0.25, 0.05], a0: 0.95, a1: 0 });
+  fire(x, z, dx, dz, y0 = 0) {
+    this.emit({ x, z, y: y0 + 1.1, vx: dx * -8 + (Math.random() - 0.5) * 3, vz: dz * -8 + (Math.random() - 0.5) * 3, vy: 0.5, life: 0.35, s0: 2.2, s1: 0.4, c0: [1, 0.85, 0.2], c1: [1, 0.25, 0.05], a0: 0.95, a1: 0 });
   }
-  sparks(x, z, n = 8, nx = 0, nz = 0) {
+  sparks(x, z, n = 8, nx = 0, nz = 0, y0 = 0) {
     for (let i = 0; i < n; i++) {
       const a = Math.random() * 6.283, s = 6 + Math.random() * 14;
-      this.emit({ x, z, y: 1.2, vx: Math.cos(a) * s + nx * 4, vz: Math.sin(a) * s + nz * 4, vy: 3 + Math.random() * 6, g: 26, life: 0.35 + Math.random() * 0.3, s0: 0.8, s1: 0.2, c0: [1, 0.95, 0.5], c1: [1, 0.5, 0.1], a0: 1, a1: 0.2 });
+      this.emit({ x, z, y: y0 + 1.2, vx: Math.cos(a) * s + nx * 4, vz: Math.sin(a) * s + nz * 4, vy: 3 + Math.random() * 6, g: 26, life: 0.35 + Math.random() * 0.3, s0: 0.8, s1: 0.2, c0: [1, 0.95, 0.5], c1: [1, 0.5, 0.1], a0: 1, a1: 0.2 });
     }
   }
   /** Clarao com raios de luz e anel de choque. */
@@ -126,28 +126,50 @@ export class FX {
     this.flashes.push({ spr, ring, t: 0, big });
   }
 
-  explosion(x, z, big = 1) {
-    this.flash(x, z, big);
-    this.flash(x, z, big * 0.6, 3.2, 0xffc060);
+  explosion(x, z, big = 1, y0 = 0) {
+    this.flash(x, z, big, y0 + 1.6);
+    this.flash(x, z, big * 0.6, y0 + 3.2, 0xffc060);
     this.lightT = 0.45;
-    this.light.position.set(x, 4, z);
-    this.scorch(x, z, 3.2 * big);
+    this.light.position.set(x, y0 + 4, z);
+    this.scorch(x, z, 3.2 * big, y0 + 0.06);
     // bola de fogo: sobe e se espalha
     for (let i = 0; i < 34 * big; i++) {
       const a = Math.random() * 6.283, s = (1 + Math.random() * 9) * big;
-      this.emit({ x, z, y: 0.8 + Math.random() * 2, vx: Math.cos(a) * s, vz: Math.sin(a) * s, vy: 3 + Math.random() * 12, g: 6, life: 0.45 + Math.random() * 0.6, s0: 3 * big, s1: 7 * big, c0: [1, 0.9, 0.35], c1: [0.9, 0.2, 0.04], a0: 1, a1: 0, drag: 1.6 });
+      this.emit({ x, z, y: y0 + 0.8 + Math.random() * 2, vx: Math.cos(a) * s, vz: Math.sin(a) * s, vy: 3 + Math.random() * 12, g: 6, life: 0.45 + Math.random() * 0.6, s0: 3 * big, s1: 7 * big, c0: [1, 0.9, 0.35], c1: [0.9, 0.2, 0.04], a0: 1, a1: 0, drag: 1.6 });
     }
     // coluna de fumaca escura que sobe devagar
     for (let i = 0; i < 22 * big; i++) {
       const a = Math.random() * 6.283, s = Math.random() * 3;
-      this.emit({ x: x + Math.cos(a) * 0.8, z: z + Math.sin(a) * 0.8, y: 1.5 + Math.random() * 2, vx: Math.cos(a) * s, vz: Math.sin(a) * s, vy: 5 + Math.random() * 8, life: 1.6 + Math.random() * 1.4, s0: 3, s1: 10, c0: [0.2, 0.2, 0.22], a0: 0.75, a1: 0, drag: 0.9 });
+      this.emit({ x: x + Math.cos(a) * 0.8, z: z + Math.sin(a) * 0.8, y: y0 + 1.5 + Math.random() * 2, vx: Math.cos(a) * s, vz: Math.sin(a) * s, vy: 5 + Math.random() * 8, life: 1.6 + Math.random() * 1.4, s0: 3, s1: 10, c0: [0.2, 0.2, 0.22], a0: 0.75, a1: 0, drag: 0.9 });
     }
     // anel de poeira da onda de choque
     for (let i = 0; i < 24; i++) {
       const a = (i / 24) * 6.283;
-      this.emit({ x, z, y: 0.4, vx: Math.cos(a) * 20 * big, vz: Math.sin(a) * 20 * big, vy: 0.5, life: 0.6, s0: 2, s1: 5, c0: [0.8, 0.72, 0.6], a0: 0.45, a1: 0, drag: 3 });
+      this.emit({ x, z, y: y0 + 0.4, vx: Math.cos(a) * 20 * big, vz: Math.sin(a) * 20 * big, vy: 0.5, life: 0.6, s0: 2, s1: 5, c0: [0.8, 0.72, 0.6], a0: 0.45, a1: 0, drag: 3 });
     }
-    this.sparks(x, z, 22);
+    this.sparks(x, z, 22, 0, 0, y0);
+  }
+  /** Impacto do gelo: anel de geada, nevoa branca e cristais subindo. */
+  frost(x, z, y0 = 0, r = 9) {
+    this.flash(x, z, 1.1, y0 + 1.5, 0x9fe6ff);
+    for (let i = 0; i < 36; i++) {
+      const a = Math.random() * 6.283, s = Math.random() * r * 1.4;
+      this.emit({ x, z, y: y0 + 0.5, vx: Math.cos(a) * s, vz: Math.sin(a) * s, vy: 2 + Math.random() * 6, g: 4, life: 0.8 + Math.random() * 0.8, s0: 2.4, s1: 6, c0: [0.85, 0.95, 1], c1: [0.55, 0.8, 1], a0: 0.7, a1: 0, drag: 2 });
+    }
+    for (let i = 0; i < 26; i++) {
+      const a = Math.random() * 6.283, s = 4 + Math.random() * 12;
+      this.emit({ x, z, y: y0 + 1, vx: Math.cos(a) * s, vz: Math.sin(a) * s, vy: 5 + Math.random() * 9, g: 26, life: 0.5 + Math.random() * 0.5, s0: 0.9, s1: 0.3, c0: [0.9, 0.98, 1], c1: [0.5, 0.8, 1], a0: 1, a1: 0.2 });
+    }
+  }
+  /** Faiscas de gelo atras do morteiro. */
+  iceTrail(x, z, y) {
+    this.emit({ x: x + (Math.random() - 0.5), z: z + (Math.random() - 0.5), y, vx: (Math.random() - 0.5) * 3, vz: (Math.random() - 0.5) * 3, vy: (Math.random() - 0.5) * 3, g: 6, life: 0.5, s0: 1.2, s1: 0.2, c0: [0.85, 0.97, 1], c1: [0.4, 0.75, 1], a0: 0.9, a1: 0 });
+  }
+  /** Agua do gelo derretendo: gotas e poca atras do cubo deslizando (so visual). */
+  meltWater(x, z, y, vx, vz) {
+    const a = Math.random() * 6.283, r = 0.8 + Math.random() * 1.8;
+    this.emit({ x: x + Math.cos(a) * r, z: z + Math.sin(a) * r, y: y + 0.3 + Math.random() * 0.6, vx: vx * 0.25 + Math.cos(a) * 1.5, vz: vz * 0.25 + Math.sin(a) * 1.5, vy: 1 + Math.random() * 2.5, g: 22, life: 0.45 + Math.random() * 0.3, s0: 0.9, s1: 0.5, c0: [0.6, 0.85, 1], c1: [0.35, 0.7, 1], a0: 0.85, a1: 0.1 });
+    if (Math.random() < 0.35) this.emit({ x: x - vx * 0.04, z: z - vz * 0.04, y: y + 0.12, vx: 0, vz: 0, vy: 0, g: 0, life: 0.9, s0: 2.2, s1: 3.2, c0: [0.55, 0.8, 1], a0: 0.4, a1: 0, drag: 2 });
   }
   splash(x, z) {
     for (let i = 0; i < 24; i++) {

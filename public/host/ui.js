@@ -63,6 +63,7 @@ export class UI {
           <div class="slots">${slots}</div>
           <div class="hint">Bots: <b>${o.bots}</b> &nbsp; <button class="btn" style="font-size:16px;padding:6px 16px" data-nav="left">−</button> <button class="btn" style="font-size:16px;padding:6px 16px" data-nav="right">+</button>
             &nbsp; Teclado (<b>K</b>): <b>${o.kbd ? 'ligado' : 'desligado'}</b></div>
+          <div class="hint">Dificuldade dos bots (<b>G</b> ou ▲▼): <button class="btn" style="font-size:16px;padding:6px 16px" data-nav="up">${o.difficulty} ▸</button></div>
           <button class="btn" data-nav="ok">ESCOLHER COPA ▶</button>
           <div class="hint">${o.masterName ? `<b>${esc(o.masterName)}</b> (Master) controla os menus pelo celular.` : 'Conecte um celular para ser o Master, ou use o teclado (Enter).'}</div>
         </div>
@@ -179,9 +180,9 @@ export class UI {
       if (!d) continue;
       if (!c.alive || c.hidden) { d.style.display = 'none'; continue; }
       // perigo: o carro esta perto de ficar para tras (borda de baixo) ou de sair pelos lados
-      const r = game.state === 'RACING' ? Math.max(cam.edgeRatio(c.x, c.z), game.offroadRatio(c)) : 0;
+      const r = game.state === 'RACING' ? Math.max(cam.edgeRatio(c.x, c.z, c.y), game.offroadRatio(c)) : 0;
       if (r > 0.72) {
-        const q = project(c.x, 0, c.z);
+        const q = project(c.x, c.y, c.z);
         const m = 30;
         d.style.display = 'block';
         d.style.left = Math.max(m, Math.min(W - m, q.behind ? W / 2 : q.x)) + 'px';

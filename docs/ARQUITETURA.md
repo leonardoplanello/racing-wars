@@ -8,15 +8,19 @@ celulares (/pad) --WebSocket--> servidor Node <--WebSocket-- host (/ , tela prin
 - **Host autoritativo**: a simulação roda no navegador da tela principal. O servidor só cria salas, atribui `deviceId` e repassa mensagens.
 - **Stack**: Node ESM, `ws`, `three`, `qrcode-generator`. Sem bundler: módulos ES + importmap; libs servidas de `node_modules` (funciona offline na LAN).
 - **`sim/` e `shared/`** são JS puro (sem DOM/Three) e rodam no navegador e no Node, por isso são testados com `node --test`.
-- **Física 2D realista** (`sim/car.js`: bicicleta dinâmica + corpo rígido de 3 círculos) renderizada em 3D com câmera de perseguição (`sim/camera.js`: enquadramento, zoom e regra de corte são matemática pura e testável). Limites da pista via distância assinada até a linha central (sem malhas de colisão, sem tunelamento). Passo fixo de 1/120 s.
+- **Física realista** (`sim/car.js`: bicicleta dinâmica no plano + corpo rígido de 3 círculos para colisões) com **altitude absoluta** (`car.y`): o carro segue o chão da pista (`track.groundAt`: tabuleiro/rampa/plateau ou terreno), decola quando o chão some mais rápido que a gravidade e pousa. O que sai do chão (carros atingidos, carcaças, pneus soltos) usa **corpo rígido 3D** (`sim/body.js`: quaternion, inércia de caixa/cilindro, contatos por impulso com atrito). Renderizada em 3D com câmera de perseguição (`sim/camera.js`: enquadramento, zoom e regra de corte são matemática pura e testável). Limites da pista via distância assinada até a linha central (sem malhas de colisão, sem tunelamento). Passo fixo de 1/120 s. Aleatoriedade da simulação só via `game.rng`.
+- **Casco de colisão** (`HULL` em `sim/car.js`): 6 círculos que cobrem corpo e rodas; os contatos de uma batida são resolvidos juntos por impulsos acumulados (8 iterações).
+- **Gelo**: `car.freeze` (timer) trava o rumo e deixa o carro deslizar; o morteiro (`items.mortars`) é balístico e congela a área no impacto.
+- **Valores ao vivo**: constantes (`CAR`, `CAMERA`, `WHOMP`...) são objetos mutáveis lidos a cada passo; o editor de debug (`public/host/debug-editor.js`) as edita sem recarregar.
+- **Relevo da pista**: `def.hills` (`from`, `to`, `height`, `rise`, `fall`, `rails`) vira `track.ELEV`; `fall: 0` faz uma rampa de salto (empina até o lábio). `track.RAILS` marca onde há cerca. `def.chasms` cria precipícios ao lado da pista (`track.CH`, `track.chasmAt`): quem entra cai e morre. Quem está abaixo do tabuleiro bate na falésia (`track.cliffAt`).
 
 ## Pastas
 ```
 server/index.js        http estático + WebSocket relay + /api/lan
 shared/protocol.js     mensagens, codec binário de input, cores
-sim/                   rng, track, car, items, game (rodadas/pontos), ai, camera, scenery (colisores do cenário)
+sim/                   rng, track, car, body (corpo rígido 3D), items, game (rodadas/pontos/pneus), ai, camera, scenery (colisores do cenário)
 sim/tracks/            definição das pistas
-public/host/           tela principal (main, net, ui, audio, kbd)
+public/host/           tela principal (main, net, ui, audio, kbd, debug, debug-editor)
 public/host/render/    Three.js: scene, world (pista/cenário), models (picape, semáforo), cars, fx, textures (canvas)
 public/pad/            controle do celular
 tools/                 smoke.js, fake-phones.js

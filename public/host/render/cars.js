@@ -2,7 +2,9 @@
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { COLORS } from '/shared/protocol.js';
-import { buildTruck, buildMine } from './models.js';
+import { buildTruck, buildMine, buildWheel, buildIceCube } from './models.js';
+import { TRAIL } from '/sim/items.js';
+
 import { crateTexture, softShadowTexture, glowTexture } from './textures.js';
 
 const WHOMP_R = 16;
@@ -22,6 +24,8 @@ export class Actors {
     this.missiles = [];
     this.shocks = [];
     this.trails = [];
+    this.wheelViews = [];
+    this.mortarViews = [];
     this.flameMat = new THREE.SpriteMaterial({ map: glowTexture('255,150,40'), transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, opacity: 0.95 });
     this.blobMat = new THREE.MeshBasicMaterial({ map: softShadowTexture(), transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -4 });
     this.boxGeo = new RoundedBoxGeometry(2.4, 2.4, 2.4, 2, 0.12);
@@ -32,7 +36,7 @@ export class Actors {
   clear() {
     this.root.clear();
     this.cars.clear();
-    this.boxes.length = this.mines.length = this.missiles.length = this.shocks.length = this.trails.length = 0;
+    this.boxes.length = this.mines.length = this.missiles.length = this.shocks.length = this.trails.length = this.wheelViews.length = this.mortarViews.length = 0;
   }
 
   setup(game) {
@@ -47,7 +51,13 @@ export class Actors {
         blob = new THREE.Mesh(new THREE.PlaneGeometry(5.6, 3.8).rotateX(-Math.PI / 2), this.blobMat);
         this.root.add(blob);
       }
-      this.cars.set(c.id, { truck, blob, bounce: Math.random() * 6 });
+      // cubo de gelo (aparece quando o carro congela); vive dentro do grupo do carro, entao acompanha a posicao e o giro
+      const cube = buildIceCube(5.3, 4.1, 3.7);
+      cube.position.set(0, 1.75, 0);
+      cube.visible = false;
+      cube.traverse((o) => { o.renderOrder = 5; });
+      truck.group.add(cube);
+      this.cars.set(c.id, { truck, blob, cube, bounce: Math.random() * 6 });
     }
     for (const b of game.items.boxes) {
       const g = new THREE.Group();
@@ -71,29 +81,32 @@ export class Actors {
       truck.group.visible = show;
       if (v.blob) v.blob.visible = show && c.state !== 'falling';
       if (!show) continue;
-      const el = c.near ? track.elevAt(c.near.s) : 0;
       const g = truck.group;
       v.bounce += dt * (4 + c.speed * 0.35);
-      const bump = c.state === 'run' ? Math.sin(v.bounce) * 0.04 * Math.min(1, c.speed / 20) : 0;
-      g.position.set(c.x, Math.max(-8, el + c.y + bump), c.z);
-      g.rotation.set(0, -c.h + c.spin, 0, 'YXZ');
-      if (c.state === 'stun') { g.rotation.x = c.roll; g.rotation.z = c.pitch; }
-      else if (c.state === 'falling') { g.rotation.z = c.fall * 1.8; g.scale.setScalar(CAR_SCALE * Math.max(0.25, 1 - c.fall * 0.45)); }
-      else {
+      const bump = c.state === 'run' && !c.air ? Math.sin(v.bounce) * 0.04 * Math.min(1, c.speed / 20) : 0;
+      g.position.set(c.x, Math.max(-8, c.y + bump), c.z); // c.y e a altitude absoluta (a fisica garante carro acima do chao)
+      if (c.state === 'falling') {
+        g.rotation.set(0, -c.h + c.spin, 0, 'YXZ');
+        g.rotation.z = c.fall * 1.8;
+        g.scale.setScalar(CAR_SCALE * Math.max(0.25, 1 - c.fall * 0.45));
+      } else {
         g.scale.setScalar(CAR_SCALE);
-        // inclina nas curvas e "senta" ao acelerar
-        g.rotation.x = c.steerSm * Math.min(1, c.speed / 24) * 0.07;
-        g.rotation.z = c.boost > 0 ? 0.05 : 0;
+        g.quaternion.set(c.q[0], c.q[1], c.q[2], c.q[3]); // orientacao vem da simulacao (rumo, terreno, capotamento)
+        if (c.state === 'run') {
+          g.rotateX(c.steerSm * Math.min(1, c.speed / 24) * 0.07); // inclina nas curvas
+        }
       }
       truck.setWreck(c.state === 'wreck');
-      truck.setItem(c.alive ? c.item : null, time);
-      if (c.state === 'wreck') { g.rotation.x = c.roll; g.rotation.z = c.pitch + 0.1; }
+      // turbina e aerofolio ficam montados enquanto o nitro estiver ativo, mesmo depois de usado
+      truck.setItem(c.alive ? (c.boost > 0 ? 'nitro' : c.item) : null, time);
+      v.cube.visible = c.freeze > 0 && c.state !== 'wreck';
+      if (v.cube.visible) v.cube.userData.setOpacity(c.freeze < 0.7 ? 0.55 + 0.27 * Math.abs(Math.sin(time * 28)) : 1); // pisca antes de quebrar
       truck.setSteer(c.steerSm);
       truck.spin((c.speed * dt) / (0.82 * CAR_SCALE));
       truck.flame.visible = c.boost > 0;
       if (c.boost > 0) truck.flame.scale.set(0.8 + Math.random() * 0.7, 1, 1);
       if (v.blob) {
-        v.blob.position.set(c.x, el + 0.1, c.z);
+        v.blob.position.set(c.x, (c.near ? track.groundFromNear(c.near, this._g || (this._g = { y: 0, nx: 0, ny: 1, nz: 0 })).y : 0) + 0.1, c.z);
         v.blob.rotation.y = -c.h;
         v.blob.scale.setScalar(Math.max(0.35, 1 - Math.max(0, c.y) * 0.06));
       }
@@ -121,12 +134,36 @@ export class Actors {
       this.root.add(spr);
       return spr;
     }, (spr, t) => {
-      const k = t.age / 3;
+      const k = t.age / TRAIL.life;
       const fl = 1 + Math.sin(time * 30 + t.x) * 0.18 + Math.sin(time * 47 + t.z) * 0.12;
       spr.position.set(t.x, track.elevAt(track.nearest(t.x, t.z, -1, this._n || (this._n = track.newNear())).s) + 1.1, t.z);
       spr.scale.set(3.4 * fl, 3.4 * fl * (1.3 - 0.5 * k), 1);
       spr.visible = k < 0.97;
     }, (spr) => this.root.remove(spr));
+    // pneus soltos (fisica da simulacao)
+    sync(this.wheelViews, game.wheels, () => {
+      const g = buildWheel();
+      g.scale.setScalar(CAR_SCALE);
+      this.root.add(g);
+      return g;
+    }, (g, w) => {
+      g.visible = !w.dead;
+      g.position.set(w.x, w.y, w.z);
+      g.quaternion.set(w.q[0], w.q[1], w.q[2], w.q[3]);
+    }, (g) => this.root.remove(g));
+    // morteiros de gelo: bola azul em arco (sem marca no chao: a area so aparece quando o gelo cai)
+    sync(this.mortarViews, game.items.mortars, () => {
+      const g = new THREE.Group();
+      const ball = new THREE.Mesh(new THREE.IcosahedronGeometry(1, 1), new THREE.MeshStandardMaterial({ color: 0xbfeaff, emissive: 0x5fb8ff, emissiveIntensity: 1.2, roughness: 0.2, flatShading: true }));
+      const glow = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTexture('120,200,255'), transparent: true, depthWrite: false, blending: THREE.AdditiveBlending }));
+      glow.scale.setScalar(5);
+      g.add(ball, glow);
+      this.root.add(g);
+      return g;
+    }, (g, m) => {
+      g.position.set(m.x, m.y, m.z);
+      g.rotation.y = m.age * 5;
+    }, (g) => { this.root.remove(g); });
     // misseis
     sync(this.missiles, game.items.missiles, () => {
       const g = new THREE.Group();

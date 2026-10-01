@@ -33,10 +33,25 @@
 - Terra aberta: dá para sair da estrada, cenário sólido, cercas quebram, longe demais explode
 - Câmera mais perto, com o pelotão no meio da tela
 
+## Versão 0.5: física 3D, relevo e carcaças
+- Altitude real do carro: rampas de salto, estado no ar, queda de área alta sem guardrails; o carro nunca entra no chão
+- Corpo rígido 3D (`sim/body.js`) para capotamento, carcaças pesadas que mantêm a velocidade e **pneus soltos** que rolam e colidem
+- Magnético sem rodopio, rastro do nitro curto, turbina/aerofólio até o fim do nitro
+- Câmera mais horizontal, que acompanha as curvas e não treme
+- Pista de teste maior: rampas, curvas fechadas e plateau sem cercas
+
+## Versão 0.6: gelo, bots e editor
+- Canhão de gelo (morteiro que congela carros em cubos de gelo que deslizam reto)
+- Hitbox cobrindo as rodas (6 círculos), pneus soltos sólidos
+- Controle mais rápido e fácil; câmera mais alta e mais calma
+- Precipício fatal na pista de teste; montanhas só fora do circuito
+- Bots em 3 dificuldades (o líder do Fácil erra) e IA melhor na largada/spawn
+- Debug: freeze com passo, editor de valores/pista ao vivo e seleção de área
+
 ## Próximos passos
 - Gerador de pistas com ~5 min por volta
 - Downtown, Water Hill, Death Mountain, Farm Jump (cenário rico por bioma)
-- Rampas e estado aéreo (Farm Jump)
+- Farm Jump (rampas e estado aéreo já existem na base)
 - Seleção de copa e circuito polida
 - Ajuste fino de física e IA de bots por dificuldade
 - Testes em celulares reais (iOS Safari / Android Chrome)

@@ -16,6 +16,9 @@ export class DebugTools {
     this.free = false;
     this.hitboxes = false;
     this.speedIdx = 0;
+    this.frozen = false; // simulacao congelada (a camera livre e o render continuam)
+    this.stepFrames = 0; // quadros a avancar com o freeze ligado
+    this.selecting = false; // modo de selecao de area (o editor liga)
     this.onToggle = onToggle;
     this.keys = new Set();
     this.pos = new THREE.Vector3();
@@ -32,6 +35,7 @@ export class DebugTools {
     addEventListener('keydown', (e) => {
       if (e.key === 'F3') { e.preventDefault(); this.toggle(); return; }
       if (!this.on) return;
+      if (e.target?.matches?.('input, textarea, select')) return; // digitando no painel do editor
       this.keys.add(e.key.toLowerCase());
       if (e.repeat) return;
       const k = e.key.toLowerCase();
@@ -41,12 +45,16 @@ export class DebugTools {
       else if (k === 'm') this.infinite = !this.infinite;
       else if (k === 'h') { this.hitboxes = !this.hitboxes; this.group.visible = this.hitboxes; }
       else if (k === 't') this.speedIdx = (this.speedIdx + 1) % SPEEDS.length;
+      else if (k === 'v') this.frozen = !this.frozen;
+      else if (k === '.') this.stepFrames = Math.min(60, this.stepFrames + 1); // um quadro com a simulacao congelada
+      else if (k === 'e') this.onSelectMode?.();
+      else if (k === 'f4') this.onEditor?.();
       else if (k === 'r') this.pending.push({ type: 'respawn' });
       else if (k === 'x') this.pending.push({ type: 'killbots' });
-      else if (k >= '1' && k <= '4') this.pending.push({ type: 'item', item: ITEMS[Number(k) - 1] });
+      else if (k >= '1' && k <= '5') this.pending.push({ type: 'item', item: ITEMS[Number(k) - 1] });
     });
     addEventListener('keyup', (e) => this.keys.delete(e.key.toLowerCase()));
-    sc.renderer.domElement.addEventListener('pointerdown', (e) => { if (this.on && this.free) { this.drag = true; e.target.setPointerCapture?.(e.pointerId); } });
+    sc.renderer.domElement.addEventListener('pointerdown', (e) => { if (this.on && this.free && !this.selecting) { this.drag = true; e.target.setPointerCapture?.(e.pointerId); } });
     addEventListener('pointerup', () => { this.drag = false; });
     addEventListener('pointermove', (e) => {
       if (!this.drag) return;
@@ -77,7 +85,9 @@ export class DebugTools {
     }
   }
 
-  get timeScale() { return this.on ? SPEEDS[this.speedIdx] : 1; }
+  get timeScale() { return this.on ? (this.frozen ? 0 : SPEEDS[this.speedIdx]) : 1; }
+  /** Quadros de 1/60 s a avancar agora (freeze + passo); consome o pedido. */
+  takeStep() { if (!(this.on && this.frozen) || !this.stepFrames) return 0; const n = this.stepFrames; this.stepFrames = 0; return n; }
   /** Flags para a simulacao (tudo desligado quando o painel esta fechado). */
   get flags() { return { infinite: this.on && this.infinite, noCut: this.on && (this.noCut || this.free) }; }
 
@@ -99,25 +109,34 @@ export class DebugTools {
 
   takeActions() { const a = this.pending; this.pending = []; return a; }
 
-  /** Desenha os circulos de colisao dos carros. */
-  updateHitboxes(game, circleOff, R) {
+  /** Desenha o casco de colisao dos carros (6 circulos que cobrem corpo e rodas) e os circulos dos pneus soltos. */
+  updateHitboxes(game, hull, R) {
     if (!(this.on && this.hitboxes && game)) return;
-    const need = game.cars.length * 3;
-    while (this.lines.length < need) {
+    const circle = (r, color) => {
       const pts = [];
-      for (let i = 0; i < 24; i++) { const a = (i / 24) * Math.PI * 2; pts.push(new THREE.Vector3(Math.cos(a) * R, 0, Math.sin(a) * R)); }
-      const l = new THREE.LineLoop(new THREE.BufferGeometry().setFromPoints(pts), new THREE.LineBasicMaterial({ color: 0x00ff66, depthTest: false }));
+      for (let i = 0; i < 24; i++) { const a = (i / 24) * Math.PI * 2; pts.push(new THREE.Vector3(Math.cos(a) * r, 0, Math.sin(a) * r)); }
+      const l = new THREE.LineLoop(new THREE.BufferGeometry().setFromPoints(pts), new THREE.LineBasicMaterial({ color, depthTest: false }));
       l.renderOrder = 20;
       this.group.add(l);
-      this.lines.push(l);
-    }
+      return l;
+    };
+    const need = game.cars.length * hull.length;
+    while (this.lines.length < need) this.lines.push(circle(R, 0x00ff66));
+    this.wheelLines = this.wheelLines || [];
+    while (this.wheelLines.length < game.wheels.length) this.wheelLines.push(circle(0.6, 0xff5050));
     let n = 0;
     for (const c of game.cars) {
-      for (let i = 0; i < 3; i++) {
+      const co = Math.cos(c.h), si = Math.sin(c.h);
+      for (let i = 0; i < hull.length; i++) {
         const l = this.lines[n++];
-        l.visible = c.alive || c.state === 'wreck';
-        l.position.set(c.x + Math.cos(c.h) * circleOff[i], 0.3, c.z + Math.sin(c.h) * circleOff[i]);
+        l.visible = c.alive || c.state === 'wreck' || c.state === 'run';
+        l.position.set(c.x + co * hull[i].x - si * hull[i].z, c.y + 0.3, c.z + si * hull[i].x + co * hull[i].z);
       }
+    }
+    for (let i = 0; i < this.wheelLines.length; i++) {
+      const w = game.wheels[i], l = this.wheelLines[i];
+      l.visible = !!w && !w.dead;
+      if (w) l.position.set(w.x, w.y, w.z);
     }
   }
 
@@ -128,7 +147,8 @@ export class DebugTools {
       `[M] corrida infinita ${f(this.infinite)}   [N] sem corte ${f(this.noCut)}\n` +
       `[G] imortal ${f(this.god)}   [H] hitboxes ${f(this.hitboxes)}\n` +
       `[F] freecam ${f(this.free)} (IJKL mover, U/O altura, Shift rapido, arrastar mouse)\n` +
-      `[T] velocidade x${SPEEDS[this.speedIdx]}   [R] renasce eu   [X] explode bots\n` +
-      `[1-4] da item: nitro/mina/missil/whomp`;
+      `[T] velocidade x${SPEEDS[this.speedIdx]}   [V] freeze ${f(this.frozen)} ([.] 1 quadro)   [R] renasce eu   [X] explode bots\n` +
+      `[F4] editor (valores, camera, pista)   [E] selecionar area ${f(this.selecting)}\n` +
+      `[1-5] da item: nitro/mina/missil/whomp/gelo`;
   }
 }
