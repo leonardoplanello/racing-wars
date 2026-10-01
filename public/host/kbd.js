@@ -26,6 +26,7 @@ export class Keyboard {
       if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') this.right = false;
     });
   }
-  get steer() { return (this.right ? 1 : 0) - (this.left ? 1 : 0); }
+  get rev() { return this.left && this.right; } // as duas setas juntas = re
+  get steer() { return this.rev ? 0 : (this.right ? 1 : 0) - (this.left ? 1 : 0); }
   takeFire() { const f = this.fireQueued; this.fireQueued = false; return f; }
 }

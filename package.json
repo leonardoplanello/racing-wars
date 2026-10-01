@@ -9,7 +9,9 @@
     "start": "node server/index.js",
     "test": "node --test \"test/*.test.js\"",
     "smoke": "node tools/smoke.js",
-    "phones": "node tools/fake-phones.js"
+    "phones": "node tools/fake-phones.js",
+    "check:dist": "node tools/check-dist.js",
+    "build:check": "node tools/build.js && node tools/check-dist.js"
   },
   "engines": {
     "node": ">=20"

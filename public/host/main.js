@@ -1,8 +1,9 @@
 // Host: orquestra menus, rede, simulacao e render.
-import { COLORS, ITEM_LABEL, MAX_PLAYERS, BTN_FIRE, BTN_AWAY } from '/shared/protocol.js';
+import { COLORS, ITEM_LABEL, MAX_PLAYERS, BTN_FIRE, BTN_AWAY, BTN_REV } from '/shared/protocol.js';
 import { buildTrack } from '/sim/track.js';
 import { Game } from '/sim/game.js';
 import { CAMERA } from '/sim/camera.js';
+import { CAR } from '/sim/car.js';
 import { makeBrain, think } from '/sim/ai.js';
 import { makeRng } from '/sim/rng.js';
 import testCircuit from '/sim/tracks/testcircuit.js';
@@ -14,11 +15,11 @@ import { createScene } from './render/scene.js';
 import { buildWorld } from './render/world.js';
 import { Actors } from './render/cars.js';
 import { FX } from './render/fx.js';
+import { Debris } from './render/debris.js';
+import { DebugTools } from './debug.js';
 
 const qs = new URLSearchParams(location.search);
 const quality = qs.get('q') === 'low' ? 'low' : 'high';
-const debugEl = document.getElementById('debug');
-if (qs.has('debug')) debugEl.hidden = false;
 
 const CUPS = [
   { id: 'fast', icon: '🏁', name: 'Fast Cup', desc: 'Condução limpa e precisão. Sem armas: só você, a pista e a câmera.' },
@@ -39,6 +40,8 @@ const kbd = new Keyboard();
 const sc = createScene(document.getElementById('gl'), quality);
 const fx = new FX(sc.scene);
 const actors = new Actors(sc.scene, { shadows: sc.shadows });
+const debris = new Debris(sc.scene);
+const dbg = new DebugTools(sc);
 let world = null;
 
 const S = {
@@ -104,7 +107,7 @@ const net = new HostNet({
   onRoom: (code) => { S.code = code; refresh(); },
   onConnect: (m) => {
     let d = S.devices.get(m.id);
-    if (!d) { d = { id: m.id, name: '', connected: true, steer: 0, fireHeld: false, fireQueued: false, away: false, rtt: 0, sent: '' }; S.devices.set(m.id, d); }
+    if (!d) { d = { id: m.id, name: '', connected: true, steer: 0, fireHeld: false, fireQueued: false, away: false, rev: false, rtt: 0, sent: '' }; S.devices.set(m.id, d); }
     d.connected = true; d.name = m.name || d.name; d.sent = '';
     if (S.bots.has(m.id)) { S.bots.delete(m.id); addBot(); }
     if (S.kbd === m.id) { S.kbd = null; const c = freeColor(); if (c >= 0) S.kbd = c; }
@@ -127,6 +130,7 @@ const net = new HostNet({
     if (fire && !d.fireHeld) d.fireQueued = true;
     d.fireHeld = fire;
     d.away = !!(r.buttons & BTN_AWAY);
+    d.rev = !!(r.buttons & BTN_REV);
   },
   onFrom: (id, m) => {
     const d = S.devices.get(id);
@@ -163,6 +167,7 @@ setInterval(syncPhones, 120);
 
 // ---------------------------------------------------------------- menus
 async function loadIps() {
+  if (window.RW?.static) { refresh(); return; }
   try {
     const r = await (await fetch('/api/lan')).json();
     S.ips = r.ips; S.port = r.port;
@@ -274,6 +279,8 @@ function startGame() {
   world = buildWorld(track, quality);
   sc.scene.add(world.group);
   actors.setup(game);
+  debris.clear();
+  fx.clearScorch();
   ui.clear();
   ui.initHud(game, S.names);
   S.phase = 'game';
@@ -290,6 +297,8 @@ function quitToLobby() {
   ui.bannerClear();
   ui.clearHud();
   actors.clear();
+  debris.clear();
+  fx.clearScorch();
   S.game = null;
   S.paused = false;
   for (const d of [...S.devices.values()]) if (!d.connected) S.devices.delete(d.id);
@@ -312,6 +321,7 @@ function handleEvents(events) {
   for (const e of events) {
     switch (e.type) {
       case 'countdown':
+        if (e.n === 3) { debris.clear(); fx.clearScorch(); }
         world?.gantry.countdown(e.n);
         ui.banner(trafficLight(e.n), 1100);
         audio.play('count');
@@ -324,17 +334,32 @@ function handleEvents(events) {
       case 'pickup': audio.play('pickup'); vib(e.car, [25]); fx.sparks(e.x, e.z, 6); break;
       case 'use':
         audio.play(e.item);
-        if (e.item === 'whomp') { cam.shake = Math.max(cam.shake, 1.5); vib(e.car, [60]); }
+        if (e.item === 'whomp') {
+          const c0 = g.carById(e.car);
+          if (c0) fx.flash(c0.x, c0.z, 1.1, 1.4, 0x6fc4ff);
+          cam.shake = Math.max(cam.shake, 2.4);
+          vib(e.car, [60]);
+        }
         break;
-      case 'explode':
-        fx.explosion(e.x, e.z, e.kind === 'missile' ? 1.2 : 1);
+      case 'explode': {
+        const big = e.kind === 'missile' ? 1.25 : 1;
+        fx.explosion(e.x, e.z, big);
+        const c = e.car >= 0 ? g.carById(e.car) : null;
+        if (c) debris.carBlast(e.x, e.z, parseInt(COLORS[c.color % 8].hex.slice(1), 16), c.vx, c.vz, c.near ? g.track.elevAt(c.near.s) : 0, big);
         audio.play('explode', e.kind === 'missile' ? 2 : 1);
-        cam.shake = Math.max(cam.shake, 3);
+        cam.shake = Math.max(cam.shake, e.kind === 'cut' ? 1.6 : 3.4);
         break;
+      }
       case 'hit': vib(e.car, [250]); break;
-      case 'whompHit': vib(e.car, [120]); break;
+      case 'whompHit': {
+        vib(e.car, [120]);
+        const c = g.carById(e.car);
+        if (c) { fx.arcs(c.x, c.z, 10 + Math.round(e.force * 22)); fx.flash(c.x, c.z, 0.35 + e.force * 0.5, 1.4, 0x6fc4ff); cam.shake = Math.max(cam.shake, 1 + e.force * 2); }
+        break;
+      }
       case 'wall':
-        fx.sparks(e.x, e.z, 6 + Math.round(e.strength * 8));
+        if (e.what === 'tree' || e.what === 'rock') fx.leaves(e.x, e.z, e.strength, e.what === 'rock');
+        else fx.sparks(e.x, e.z, 6 + Math.round(e.strength * 8));
         audio.play('wall', e.strength);
         cam.shake = Math.max(cam.shake, 0.4 + e.strength);
         vib(e.car, [30 + Math.round(e.strength * 60)]);
@@ -343,9 +368,9 @@ function handleEvents(events) {
       case 'alarm': audio.play('alarm'); vib(e.car, [70, 40, 70]); break;
       case 'fall': fx.splash(e.x, e.z); audio.play('fall'); break;
       case 'dead': {
-        const why = e.cause === 'fall' ? 'caiu da pista' : 'saiu do enquadramento';
+        const why = { fall: 'caiu no rio', cut: 'ficou para trás', mine: 'pisou numa mina', missile: 'levou um míssil', trail: 'passou no rastro do nitro', offroad: 'se perdeu no mato' }[e.cause] || 'explodiu';
         ui.killfeed(`${nameOf(e.car)} ${why}`, hexOf(e.car));
-        if (e.cause === 'cut') { fx.explosion(e.x, e.z, 1); audio.play('cut'); cam.shake = Math.max(cam.shake, 2.2); }
+        if (e.cause === 'cut') audio.play('cut');
         vib(e.car, [400]);
         break;
       }
@@ -406,31 +431,56 @@ function tick(dt, now) {
             g.setInput(c.id, r.steer, r.fire);
           }
         } else if (kind === 'kbd') {
-          g.setInput(c.id, kbd.steer, kbd.takeFire());
+          g.setInput(c.id, kbd.steer, kbd.takeFire(), kbd.rev);
         } else {
           const d = S.devices.get(c.id);
           if (d) {
-            g.setInput(c.id, d.connected && !d.away ? d.steer : 0, d.fireQueued);
+            g.setInput(c.id, d.connected && !d.away ? d.steer : 0, d.fireQueued, d.connected && !d.away && d.rev);
             d.fireQueued = false;
           }
         }
       }
-      g.update(dt);
+      const gd = dbg.flags;
+      g.debug.infinite = gd.infinite;
+      g.debug.noCut = gd.noCut;
+      for (const c of g.cars) c.god = dbg.on && dbg.god && S.kinds.get(c.id) !== 'bot';
+      debugActions(g);
+      g.update(dt * dbg.timeScale);
       const ev = g.drainEvents();
       if (ev.length) { handleEvents(ev); syncPhones(); }
       ambient(g, dt);
     }
     sc.frame(g.camera);
+    dbg.applyCamera(dt);
+    dbg.updateHitboxes(g, CAR.circleOff, CAR.circleR);
     actors.update(g, now / 1000, dt);
-    world?.update(now / 1000);
+    if (world) {
+      for (const b of world.update(now / 1000, g.cars)) {
+        debris.fence(b.x, b.z, b.dx, b.dz, b.speed, b.y, b.kind);
+        if (b.kind === 'iron') fx.sparks(b.x, b.z, 8); else fx.woodChips(b.x, b.z, b.dx, b.dz, b.speed, b.y + 1);
+        audio.play('wall', 0.4);
+      }
+    }
     ui.updateHud(g);
     ui.updateLabels(g, (x, y, z) => sc.toScreen(x, y, z, scr), g.camera);
+    debris.update(S.paused ? 0 : dt * dbg.timeScale);
     fx.update(S.paused ? 0 : dt, sc.renderer.domElement.height / (2 * Math.tan((CAMERA.fov * Math.PI) / 360)));
   }
   sc.render();
-  if (!debugEl.hidden) {
+  if (dbg.on) {
     const rt = [...S.devices.values()].map((d) => `${d.id}:${d.rtt}ms${d.away ? '(away)' : ''}`).join(' ');
-    debugEl.textContent = `${fps} fps · fase ${S.phase}${g ? ' · ' + g.state : ''}\n${rt}`;
+    dbg.text(fps, `fase ${S.phase}${g ? ' · ' + g.state + ' · rodada ' + g.round : ''}
+${rt}`);
+  }
+}
+
+/** Acoes de debug pedidas pelo teclado (dar item, renascer, explodir bots). */
+function debugActions(g) {
+  for (const a of dbg.takeActions()) {
+    const humans = g.cars.filter((c) => S.kinds.get(c.id) !== 'bot');
+    if (a.type === 'item') { for (const c of humans) if (c.alive) c.item = a.item; }
+    else if (a.type === 'respawn') { for (const c of humans) if (!c.alive && c.state === 'wreck') c.wreckT = 9; }
+    else if (a.type === 'killbots') for (const c of g.cars) if (S.kinds.get(c.id) === 'bot') g.explodeCar(c, 'mine');
   }
 }
 
@@ -438,6 +488,12 @@ function tick(dt, now) {
 function ambient(g, dt) {
   let vmax = 0, slip = 0;
   for (const c of g.cars) {
+    if (c.state === 'wreck') {
+      // carcaca: fumaca escura e chamas nos primeiros segundos
+      if (Math.random() < dt * (c.wreckT < 4 ? 26 : 9)) fx.smoke(c.x + (Math.random() - 0.5) * 1.5, c.z + (Math.random() - 0.5) * 1.5, 1.4);
+      if (c.wreckT < 4 && Math.random() < dt * 18) fx.fire(c.x, c.z, 0, 0);
+      continue;
+    }
     if (!c.alive || c.hidden) continue;
     vmax = Math.max(vmax, c.speed);
     slip = Math.max(slip, c.slip);
@@ -446,6 +502,7 @@ function ambient(g, dt) {
     if (c.state === 'run' && c.slip > 4 && Math.random() < dt * 40) fx.smoke(c.x - fx0 * 1.5, c.z - fz0 * 1.5, 0.6);
     if (c.state === 'run' && c.speed > 8 && (c.onVerge || c.surf === 2) && Math.random() < dt * 30) fx.dust(c.x - fx0 * 1.6, c.z - fz0 * 1.6);
     if (c.state === 'stun' && Math.random() < dt * 40) fx.smoke(c.x, c.z, 1);
+    if (c.state === 'stun' && c.stun > 0.3 && Math.random() < dt * 30) fx.arcs(c.x, c.z, 2);
   }
   audio.setEngine(vmax, g.state === 'RACING');
   audio.setSqueal(g.state === 'RACING' ? Math.min(1, Math.max(0, slip - 3) / 8) : 0);

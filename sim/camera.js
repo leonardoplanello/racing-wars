@@ -1,30 +1,31 @@
-// Camera de perseguicao: fica SEMPRE atras do pelotao, olhando ao longo da pista.
-// Toda a matematica (enquadramento, zoom e corte de carros) e pura, sem Three, para ser testada.
+// Camera de perseguicao: fica SEMPRE atras do pelotao, olhando ao longo da pista, com o grupo
+// de carros no MEIO da tela. Toda a matematica (enquadramento, zoom e corte) e pura, sem Three.
 //
 // Regras:
-//  - o lider fica ancorado no terco superior da tela (nunca sai pela frente);
-//  - o zoom out (altura/distancia) aumenta para encaixar o carro mais atrasado, ate um LIMITE fixo;
-//  - so e cortado quem fica para TRAS (borda de baixo) ou foge muito pelos lados. Nunca pela frente.
+//  - a ancora e o ponto medio entre o lider e o ultimo carro: o pelotao fica no centro da tela;
+//  - o zoom out (altura) aumenta para caber lider (em cima) e ultimo (embaixo), ate um LIMITE fixo;
+//  - passando do limite, a ancora favorece o LIDER: ele nunca sai pela frente; so quem fica para
+//    TRAS (borda de baixo) ou foge muito pelos lados e cortado.
 
 const RAD = Math.PI / 180;
 
 export const CAMERA = {
-  pitch: 36 * RAD, // inclinacao para baixo
+  pitch: 60 * RAD, // inclinacao para baixo (mais de cima: carros ao meio da tela)
   fov: 52, // graus, vertical
-  hMin: 16, // altura minima
-  hMax: 27, // LIMITE do zoom-out
-  leaderNy: 0.5, // posicao vertical do lider na tela (-1 baixo .. +1 topo)
-  rearNy: -0.8, // o zoom tenta manter o ultimo carro acima disso
-  cutNy: -1.05, // abaixo disso o carro e destruido (ficou para tras)
-  cutNx: 1.4, // lateral: fallback para curvas
-  yawLook: 18, // antecipacao do rumo (unidades ao longo da pista)
-  carY: 0.6,
+  hMin: 31, // altura minima
+  hMax: 48, // LIMITE do zoom-out
+  topNy: 0.5, // o lider nunca passa disso (fica abaixo da placa de voltas)
+  sideNx: 0.78, // os carros tambem cabem na largura
+  rearNy: -0.52, // o zoom tenta manter o ultimo carro acima disso
+  cutNy: -0.86, // abaixo disso o carro e destruido (ficou para tras)
+  cutNx: 2.0, // lateral: so se for muito longe (explorar o cenario e permitido)
+  yawLook: 22, // antecipacao do rumo (unidades ao longo da pista)
+  carY: 0.5,
 };
 
 const T = Math.tan((CAMERA.fov * RAD) / 2);
-const BETA = Math.atan(CAMERA.leaderNy * T);
-/** distancia horizontal atras do lider por unidade de altura */
-const BACK_PER_H = 1 / Math.tan(CAMERA.pitch - BETA);
+/** distancia horizontal atras da ancora por unidade de altura (a ancora fica no centro da tela) */
+const BACK_PER_H = 1 / Math.tan(CAMERA.pitch);
 
 const wrap = (a) => Math.atan2(Math.sin(a), Math.cos(a));
 
@@ -47,7 +48,7 @@ export function projectWith(cx, cy, cz, yaw, aspect, px, py, pz, out) {
 export class ChaseCamera {
   constructor(aspect = 16 / 9) {
     this.aspect = aspect;
-    this.ax = 0; this.az = 0; this.yaw = 0; this.H = CAMERA.hMin + 4;
+    this.ax = 0; this.az = 0; this.yaw = 0; this.H = CAMERA.hMin + 3;
     this.tax = 0; this.taz = 0; this.tyaw = 0; this.tH = this.H;
     this.fast = 1; // multiplicador da suavizacao (last stand)
     this.shake = 0;
@@ -74,38 +75,59 @@ export class ChaseCamera {
   computeTarget(cars, track) {
     if (!cars.length) return;
     if (!(this.aspect > 0.3 && this.aspect < 10)) this.aspect = 16 / 9;
-    let leader = cars[0];
-    for (const c of cars) if (c.progress > leader.progress) leader = c;
-    this.tax = leader.x;
-    this.taz = leader.z;
+    let leader = cars[0], rear = cars[0];
+    for (const c of cars) {
+      if (c.progress > leader.progress) leader = c;
+      if (c.progress < rear.progress) rear = c;
+    }
     const p = track.pointAt((leader.near ? leader.near.s : track.wrapS(leader.progress)) + CAMERA.yawLook);
-    this.tyaw = Math.atan2(p.tz, p.tx);
+    const yaw = Math.atan2(p.tz, p.tx);
+    this.tyaw = yaw;
 
-    // menor altura que mantem o carro mais atrasado visivel (busca binaria; monotonica)
     const tmp = { x: 0, y: 0, z: 0 }, o = { nx: 0, ny: 0, d: 0 };
-    const minNy = (H) => {
-      this.posFor(this.tax, this.taz, this.tyaw, H, tmp);
-      let m = Infinity;
+    // extremos verticais da tela dos carros para uma ancora e altura dadas
+    const extent = (ax, az, H) => {
+      this.posFor(ax, az, yaw, H, tmp);
+      let lo = Infinity, hi = -Infinity, wide = 0;
       for (const c of cars) {
-        projectWith(tmp.x, tmp.y, tmp.z, this.tyaw, this.aspect, c.x, CAMERA.carY, c.z, o);
-        m = Math.min(m, o.d > 0.1 ? o.ny : -9);
+        projectWith(tmp.x, tmp.y, tmp.z, yaw, this.aspect, c.x, CAMERA.carY, c.z, o);
+        const ny = o.d > 0.1 ? o.ny : -9;
+        if (ny < lo) lo = ny;
+        if (ny > hi) hi = ny;
+        if (Math.abs(o.nx) > wide) wide = Math.abs(o.nx);
       }
-      return m;
+      return [lo, hi, wide];
     };
-    if (minNy(CAMERA.hMin) >= CAMERA.rearNy) this.tH = CAMERA.hMin;
-    else if (minNy(CAMERA.hMax) < CAMERA.rearNy) this.tH = CAMERA.hMax;
-    else {
+    const fits = (ax, az, H) => { const [lo, hi, wide] = extent(ax, az, H); return lo >= CAMERA.rearNy && hi <= CAMERA.topNy && wide <= CAMERA.sideNx; };
+
+    // ancora = ponto medio entre o lider e o ultimo
+    let ax = (leader.x + rear.x) / 2, az = (leader.z + rear.z) / 2;
+    if (fits(ax, az, CAMERA.hMin)) this.tH = CAMERA.hMin;
+    else if (fits(ax, az, CAMERA.hMax)) {
       let lo = CAMERA.hMin, hi = CAMERA.hMax;
+      for (let i = 0; i < 12; i++) { const mid = (lo + hi) / 2; if (fits(ax, az, mid)) hi = mid; else lo = mid; }
+      this.tH = hi;
+    } else {
+      // nao cabe: zoom maximo e a ancora vai ao lider ate ele caber no topo (so o ultimo sai por baixo)
+      this.tH = CAMERA.hMax;
+      let lo = 0, hi = 1; // fracao do caminho da ancora ate o lider
       for (let i = 0; i < 12; i++) {
         const mid = (lo + hi) / 2;
-        if (minNy(mid) >= CAMERA.rearNy) hi = mid; else lo = mid;
+        const bx = ax + (leader.x - ax) * mid, bz = az + (leader.z - az) * mid;
+        this.posFor(bx, bz, yaw, CAMERA.hMax, tmp);
+        projectWith(tmp.x, tmp.y, tmp.z, yaw, this.aspect, leader.x, CAMERA.carY, leader.z, o);
+        if (o.ny > CAMERA.topNy) lo = mid; else hi = mid;
       }
-      this.tH = hi;
+      // ancora ainda mais perto do lider por seguranca (o lider nunca pode sair pela frente)
+      ax += (leader.x - ax) * hi; az += (leader.z - az) * hi;
     }
+    // compensa o atraso da suavizacao (filtro de 1a ordem a 9/s): sem isso o grupo aparece deslocado para frente
+    this.tax = ax + (((leader.vx || 0) + (rear.vx || 0)) / 2) / 9;
+    this.taz = az + (((leader.vz || 0) + (rear.vz || 0)) / 2) / 9;
   }
 
   /** Foco fechado em um carro (zoom do sobrevivente). */
-  focus(car, track, H = 11) {
+  focus(car, track, H = 9) {
     this.tax = car.x; this.taz = car.z;
     const p = track.pointAt((car.near ? car.near.s : track.wrapS(car.progress)) + CAMERA.yawLook);
     this.tyaw = Math.atan2(p.tz, p.tx);

@@ -89,17 +89,68 @@ export function asphaltTexture() {
   return toTex(c);
 }
 
+/** Estrada de terra avermelhada com sulcos paralelos ao sentido da pista (v). */
 export function dirtTexture() {
   const rng = makeRng(8);
   const [c, g] = canvas(256, 256);
-  g.fillStyle = '#b98a55'; g.fillRect(0, 0, 256, 256);
+  g.fillStyle = '#9c5b3c'; g.fillRect(0, 0, 256, 256);
+  // sulcos longos (faixas mais escuras e mais claras)
+  const lanes = 8, lw = 256 / lanes;
+  for (let i = 0; i < lanes; i++) {
+    g.fillStyle = i % 2 ? 'rgba(70,32,20,.35)' : 'rgba(255,200,150,.10)';
+    g.fillRect(i * lw, 0, lw, 256);
+    g.fillStyle = 'rgba(50,22,14,.45)';
+    g.fillRect(i * lw, 0, 2, 256);
+  }
   for (let i = 0; i < 1800; i++) {
     const k = 0.7 + rng() * 0.6;
-    g.fillStyle = shade(185, 138, 85, k); g.globalAlpha = 0.5;
-    g.beginPath(); g.arc(rng() * 256, rng() * 256, 1 + rng() * 4, 0, 7); g.fill();
+    g.fillStyle = shade(156, 91, 60, k); g.globalAlpha = 0.35;
+    g.beginPath(); g.arc(rng() * 256, rng() * 256, 1 + rng() * 3, 0, 7); g.fill();
   }
   g.globalAlpha = 1;
   return toTex(c);
+}
+
+/** Paralelepipedo grande cinza-bege (praca). */
+export function cobbleTexture() {
+  const rng = makeRng(14);
+  const [c, g] = canvas(256, 256);
+  g.fillStyle = '#6a6a70'; g.fillRect(0, 0, 256, 256);
+  const rows = 5, size = 256 / rows;
+  for (let r = 0; r < rows; r++) {
+    const cols = 5;
+    for (let i = 0; i < cols; i++) {
+      const x = i * size + (r % 2 ? size / 2 : 0), y = r * size;
+      const k = 0.82 + rng() * 0.3;
+      g.fillStyle = shade(196, 188, 170, k);
+      g.beginPath();
+      g.roundRect(x + 2.5, y + 2.5, size - 5, size - 5, 6);
+      g.fill();
+      g.fillStyle = 'rgba(255,255,255,.12)'; g.fillRect(x + 4, y + 4, size - 10, 3);
+      g.fillStyle = 'rgba(0,0,0,.12)'; g.fillRect(x + 4, y + size - 8, size - 10, 3);
+    }
+  }
+  return toTex(c);
+}
+
+/** Caixote de madeira escura com tampa laranja e simbolo azul brilhante. */
+export function crateTexture() {
+  const [c, g] = canvas(128, 128);
+  g.fillStyle = '#3b2418'; g.fillRect(0, 0, 128, 128);
+  for (let i = 0; i < 4; i++) {
+    g.fillStyle = i % 2 ? '#4a2e1d' : '#35200f';
+    g.fillRect(0, i * 32 + 14, 128, 28);
+  }
+  g.fillStyle = '#e8892b'; g.fillRect(0, 0, 128, 18);
+  g.fillStyle = '#b8601a'; g.fillRect(0, 14, 128, 4);
+  g.strokeStyle = '#1d110a'; g.lineWidth = 6; g.strokeRect(3, 3, 122, 122);
+  g.shadowColor = '#44b4ff'; g.shadowBlur = 14;
+  g.fillStyle = '#7fd2ff';
+  g.beginPath();
+  g.arc(64, 54, 11, 0, 7); g.fill();
+  g.fillRect(58, 66, 12, 34);
+  g.fillRect(48, 76, 32, 8);
+  return toTex(c, { repeat: false });
 }
 
 export function grassTexture() {
@@ -270,5 +321,22 @@ export function glowTexture(color = '255,255,255') {
   const gr = g.createRadialGradient(32, 32, 2, 32, 32, 32);
   gr.addColorStop(0, `rgba(${color},1)`); gr.addColorStop(0.4, `rgba(${color},.45)`); gr.addColorStop(1, `rgba(${color},0)`);
   g.fillStyle = gr; g.fillRect(0, 0, 64, 64);
+  return toTex(c, { repeat: false });
+}
+
+/** Clarao branco com raios de luz azulados (explosao). */
+export function starburstTexture() {
+  const [c, g] = canvas(256, 256);
+  g.translate(128, 128);
+  for (let i = 0; i < 14; i++) {
+    const a = (i / 14) * Math.PI * 2 + (i % 2) * 0.1, len = 70 + ((i * 37) % 50);
+    const gr = g.createLinearGradient(0, 0, Math.cos(a) * len, Math.sin(a) * len);
+    gr.addColorStop(0, 'rgba(255,255,255,.95)'); gr.addColorStop(1, 'rgba(120,200,255,0)');
+    g.strokeStyle = gr; g.lineWidth = 5 + (i % 3) * 3;
+    g.beginPath(); g.moveTo(0, 0); g.lineTo(Math.cos(a) * len, Math.sin(a) * len); g.stroke();
+  }
+  const core = g.createRadialGradient(0, 0, 4, 0, 0, 64);
+  core.addColorStop(0, 'rgba(255,255,255,1)'); core.addColorStop(0.5, 'rgba(255,255,255,.85)'); core.addColorStop(1, 'rgba(255,255,255,0)');
+  g.fillStyle = core; g.beginPath(); g.arc(0, 0, 64, 0, 7); g.fill();
   return toTex(c, { repeat: false });
 }

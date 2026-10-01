@@ -1,14 +1,22 @@
 // Caixas de item, minas, misseis e ondas Whomp.
 import { ITEMS } from '../shared/protocol.js';
-import { CAR, hitCar } from './car.js';
+import { CAR } from './car.js';
 
-const BOX_RADIUS = 2.6;
+const BOX_RADIUS = 2.3;
 const BOX_RESPAWN = 6;
 const MINE_TRIGGER = 2.3;
-const MISSILE = { speed: 46, turn: 3.6, life: 5, hit: 1.9, blast: 3.4 };
-const WHOMP = { radius: 17, speed: 58, push: 30 };
+const MISSILE = { speed: 90, life: 4, hit: 1.6, blast: 3.2 };
+// rastro do nitro: segmentos de fogo que explodem quem passar (menos o dono)
+export const TRAIL = { gap: 1.1, life: 3, radius: 1.5 };
+// Whomp: forca exponencial com a distancia (curto alcance): F = push * exp(-d / lambda)
+export const WHOMP = { radius: 16, speed: 40, push: 110, lambda: 3.5, lift: 11 };
 
 export const CUP_BOX_DENSITY = { fast: 0, super: 1, war: 2 };
+
+/** Intensidade (0..1) do Whomp a uma distancia d do carro que o soltou. */
+export function whompFactor(d) {
+  return d > WHOMP.radius ? 0 : Math.exp(-d / WHOMP.lambda);
+}
 
 export class Items {
   constructor(track, cup, rng) {
@@ -19,6 +27,8 @@ export class Items {
     this.mines = [];
     this.missiles = [];
     this.shocks = [];
+    this.trails = [];
+    this.lastTrail = new Map();
     this.nextId = 1;
     this.buildBoxes();
   }
@@ -28,14 +38,17 @@ export class Items {
     this.boxes.length = 0;
     if (dens === 0) return;
     const groups = this.track.def.boxGroups || [];
+    // War: 5 caixas espalhadas (2-1-2); Super: 3 caixas em V; grupos alternados na Super Cup
+    const pattern = dens === 2
+      ? [[-0.62, 0], [0.62, 0], [0, 4.5], [-0.34, 9], [0.34, 9]]
+      : [[-0.5, 0], [0.5, 0], [0, 5]];
     groups.forEach((frac, gi) => {
-      if (dens === 1 && gi % 2 === 1) return; // Super Cup: metade dos grupos
+      if (dens === 1 && gi % 2 === 1) return;
       const s = frac * this.track.length;
-      const p = this.track.pointAt(s);
       const hw = this.track.halfWidth;
-      const offs = dens === 2 ? [-0.55, 0, 0.55] : [-0.4, 0.4];
-      for (const o of offs) {
-        this.boxes.push({ x: p.x + p.nx * hw * o, z: p.z + p.nz * hw * o, active: true, timer: 0, s });
+      for (const [o, ds] of pattern) {
+        const p = this.track.pointAt(s + ds);
+        this.boxes.push({ x: p.x + p.nx * hw * o, z: p.z + p.nz * hw * o, active: true, timer: 0, s: s + ds });
       }
     });
   }
@@ -45,6 +58,8 @@ export class Items {
     this.mines.length = 0;
     this.missiles.length = 0;
     this.shocks.length = 0;
+    this.trails.length = 0;
+    this.lastTrail.clear();
   }
 
   randomItem() {
@@ -91,19 +106,15 @@ export class Items {
     for (let i = this.missiles.length - 1; i >= 0; i--) {
       const m = this.missiles[i];
       m.age += dt;
-      const target = game.carById(m.target);
-      if (target && target.alive) {
-        const want = Math.atan2(target.z - m.z, target.x - m.x);
-        let diff = Math.atan2(Math.sin(want - m.h), Math.cos(want - m.h));
-        const maxT = MISSILE.turn * dt;
-        diff = Math.max(-maxT, Math.min(maxT, diff));
-        m.h += diff;
-        // alarme sonoro/haptico no alvo
-        m.alarm -= dt;
-        const dist = Math.hypot(target.x - m.x, target.z - m.z);
-        if (m.alarm <= 0 && dist < 36) {
-          m.alarm = 0.26;
-          events.push({ type: 'alarm', car: target.id });
+      // sempre em linha reta; so avisa (alarme) quem esta na linha de tiro
+      m.alarm -= dt;
+      if (m.alarm <= 0) {
+        const mx = Math.cos(m.h), mz = Math.sin(m.h);
+        for (const t of cars) {
+          if (!t.alive || t.id === m.owner) continue;
+          const dx = t.x - m.x, dz = t.z - m.z;
+          const ahead = dx * mx + dz * mz, lat = -dx * mz + dz * mx;
+          if (ahead > 0 && ahead < 36 && Math.abs(lat) < 3.2) { m.alarm = 0.26; events.push({ type: 'alarm', car: t.id }); break; }
         }
       }
       m.x += Math.cos(m.h) * MISSILE.speed * dt;
@@ -127,39 +138,73 @@ export class Items {
         this.missiles.splice(i, 1);
       }
     }
-    // ondas whomp
+    // rastro do nitro: quem aciona deixa fogo no chao; outros carros que cruzarem explodem
+    for (const c of cars) {
+      if (!c.alive || c.state === 'falling' || !(c.boost > 0)) continue;
+      const last = this.trails.length ? this.lastTrail.get(c.id) : null;
+      const bx = c.x - Math.cos(c.h) * 1.9, bz = c.z - Math.sin(c.h) * 1.9;
+      if (!last || Math.hypot(bx - last.x, bz - last.z) >= TRAIL.gap) {
+        const seg = { x: bx, z: bz, owner: c.id, age: 0 };
+        this.trails.push(seg);
+        this.lastTrail.set(c.id, seg);
+      }
+    }
+    for (let i = this.trails.length - 1; i >= 0; i--) {
+      const t = this.trails[i];
+      t.age += dt;
+      if (t.age > TRAIL.life) { this.trails.splice(i, 1); continue; }
+      if (t.age < 0.25) continue; // o fogo nasce atras do dono: da tempo dele se afastar
+      for (const c of cars) {
+        if (!c.alive || c.state === 'falling' || c.id === t.owner) continue;
+        const dx = c.x - t.x, dz = c.z - t.z, rr = TRAIL.radius + 1.0;
+        if (dx * dx + dz * dz < rr * rr) { game.explodeCar(c, 'trail', t.owner, t.x, t.z); }
+      }
+    }
+    // ondas whomp (magneticas)
     for (let i = this.shocks.length - 1; i >= 0; i--) {
       const s = this.shocks[i];
       s.r += WHOMP.speed * dt;
       for (const c of cars) {
-        if (!c.alive || c.state === 'falling' || c.id === s.owner || s.hit.has(c.id)) continue;
+        if (!(c.alive || c.state === 'wreck') || c.state === 'falling' || c.id === s.owner || s.hit.has(c.id)) continue;
         const dx = c.x - s.x, dz = c.z - s.z;
         const d = Math.hypot(dx, dz);
-        if (d <= s.r) {
-          s.hit.add(c.id);
-          const k = WHOMP.push * (1 - Math.min(1, d / WHOMP.radius)) + 15;
-          const nx = d > 0.01 ? dx / d : 1, nz = d > 0.01 ? dz / d : 0;
-          c.vx += nx * k;
-          c.vz += nz * k;
-          if (c.state === 'run') { c.state = 'stun'; c.stun = 0.55; c.vy = 3; c.y = 0.01; c.spinVel = 7; }
-          events.push({ type: 'whompHit', car: c.id, by: s.owner });
+        if (d > s.r || d > WHOMP.radius) continue;
+        s.hit.add(c.id);
+        const e = whompFactor(d);
+        const k = WHOMP.push * e;
+        if (k < 1.5) continue;
+        const nx = d > 0.01 ? dx / d : 1, nz = d > 0.01 ? dz / d : 0;
+        c.vx += nx * k;
+        c.vz += nz * k;
+        c.w += (nx * Math.sin(c.h) - nz * Math.cos(c.h)) * k * 0.05;
+        c.vy = Math.max(c.vy, WHOMP.lift * e); // sai do chao
+        c.y = Math.max(c.y, 0.05);
+        if (c.state === 'run' || c.state === 'grid') {
+          c.state = 'stun'; c.stun = 0.5 + 1.0 * e;
+          c.w += (nx * Math.sin(c.h) - nz * Math.cos(c.h) > 0 ? 1 : -1) * (4 + 10 * e); // giro real: o carro fica virado onde parar
         }
+        if (c.state === 'stun' || c.state === 'wreck') {
+          c.pitchVel += (nx * Math.cos(c.h) + nz * Math.sin(c.h)) * 9 * e; // capota para longe da onda
+          c.rollVel += (nx * Math.sin(c.h) - nz * Math.cos(c.h)) * 9 * e;
+        }
+        events.push({ type: 'whompHit', car: c.id, by: s.owner, force: e });
       }
       if (s.r >= WHOMP.radius) this.shocks.splice(i, 1);
     }
   }
 
-  /** Explosao: atinge o carro `direct` e vizinhos no raio. */
+  /** Explosao de mina/missil: o carro atingido (e vizinhos no raio) EXPLODE e vira carcaca. */
   explode(game, x, z, kind, power, owner, direct) {
-    game.events.push({ type: 'explode', kind, x, z, owner });
-    const radius = kind === 'missile' ? MISSILE.blast : 3;
+    const radius = kind === 'missile' ? MISSILE.blast : 2.6;
+    let any = false;
     for (const c of game.cars) {
       if (!c.alive || c.state === 'falling') continue;
       if (c === direct || (c.id !== owner && Math.hypot(c.x - x, c.z - z) < radius)) {
-        hitCar(c, kind === 'missile' ? 1.25 : 1);
-        game.events.push({ type: 'hit', car: c.id, by: owner, kind });
+        game.explodeCar(c, kind, owner, x, z);
+        any = true;
       }
     }
+    if (!any) game.events.push({ type: 'explode', kind, x, z, owner, car: -1 });
   }
 
   /** Usa o item guardado pelo carro. Retorna o tipo usado ou null. */
@@ -175,7 +220,7 @@ export class Items {
     } else if (item === 'missile') {
       this.missiles.push({
         id: this.nextId++, x: car.x + fx * 2.6, z: car.z + fz * 2.6, h: car.h,
-        owner: car.id, target: game.missileTarget(car), age: 0, alarm: 0, near: null,
+        owner: car.id, age: 0, alarm: 0, near: null,
       });
     } else if (item === 'whomp') {
       this.shocks.push({ x: car.x, z: car.z, r: 0, owner: car.id, hit: new Set() });

@@ -22,8 +22,12 @@
 <div id="pad" class="view" hidden>
   <div id="hdr"><span id="who"></span><span id="pts"></span><span id="ping">●</span><button id="fs" aria-label="Tela cheia">⛶</button></div>
   <div id="drive" hidden>
-    <div class="half left"><div class="hint">DIREÇÃO<br><small>deslize aqui</small></div><div id="anchor"></div></div>
-    <div class="half right"><div id="item"><div id="ico"></div><div id="itl"></div></div><div class="hint" id="firehint">TOQUE PARA USAR</div></div>
+    <div id="act"><div id="ico"></div><div id="itl"></div><div class="hint" id="firehint">AÇÃO</div></div>
+    <div id="arrows">
+      <div class="arrow" id="btnL">◀</div>
+      <div class="arrow" id="btnR">▶</div>
+    </div>
+    <div id="revhint">as duas setas juntas = RÉ</div>
   </div>
   <div id="menu" hidden>
     <div id="mtitle"></div>
@@ -35,6 +39,7 @@
     <button data-k="back" class="back">VOLTAR</button>
   </div>
   <div id="msg" hidden></div>
+  <div id="skull" hidden>💀</div>
 </div>
 <div id="rotate"><div class="ph">📱</div>Gire o celular<br>para o modo paisagem</div>
 <script src="/pad/pad.js" type="module"></script>

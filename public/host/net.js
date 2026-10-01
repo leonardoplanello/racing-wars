@@ -11,8 +11,10 @@ export class HostNet {
   }
 
   connect() {
+    const cfg = window.RW || {};
+    if (cfg.static && !cfg.relay) { this.h.onStatus?.('offline'); return; } // Pages sem relay: so teclado
     const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const ws = new WebSocket(`${proto}//${location.host}/ws`);
+    const ws = new WebSocket(cfg.relay || `${proto}//${location.host}/ws`);
     ws.binaryType = 'arraybuffer';
     this.ws = ws;
     ws.onopen = () => {

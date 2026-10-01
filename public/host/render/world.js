@@ -2,12 +2,15 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { makeRng } from '/sim/rng.js';
+import { buildScenery } from '/sim/scenery.js';
 import { gridSlot } from '/sim/game.js';
 import * as TX from './textures.js';
 import { buildStartGantry } from './models.js';
 
 const RIVER_HALF = 34; // meia-largura do rio em volta da ponte
 const WATER_Y = -1.1;
+const BK_CELL = 10;
+const ZERO = new THREE.Matrix4().makeScale(0, 0, 0);
 
 const m4 = new THREE.Matrix4(), qt = new THREE.Quaternion(), eu = new THREE.Euler(), ps = new THREE.Vector3(), sc = new THREE.Vector3();
 
@@ -42,6 +45,9 @@ export function buildWorld(track, quality = 'high') {
   const low = quality === 'low';
   const group = new THREE.Group();
   const rng = makeRng(99);
+  if (!track.scenery) track.scenery = buildScenery(track);
+  const breakables = []; // trechos de cerca que quebram quando um carro passa
+  const meshes = {};
   const { N, X, Z, TX: TXs, TZ: TZs, NX, NZ, ELEV, BRIDGE, SURFACE } = track;
   const hw = track.halfWidth, edge = hw + track.verge;
   const L = track.length, ds = track.ds;
@@ -52,18 +58,18 @@ export function buildWorld(track, quality = 'high') {
     wood: new THREE.MeshStandardMaterial({ map: TX.woodTexture(), roughness: 0.85 }),
     asphalt: new THREE.MeshStandardMaterial({ map: TX.asphaltTexture(), roughness: 0.92 }),
     dirt: new THREE.MeshStandardMaterial({ map: TX.dirtTexture(), roughness: 1 }),
-    stone: new THREE.MeshStandardMaterial({ map: TX.stoneTexture(), roughness: 0.9 }),
+    cobble: new THREE.MeshStandardMaterial({ map: TX.cobbleTexture(), roughness: 0.9 }),
+    iron: new THREE.MeshStandardMaterial({ color: 0x1a1d26, roughness: 0.45, metalness: 0.6 }),
     steel: new THREE.MeshStandardMaterial({ map: TX.steelTexture(), roughness: 0.5, metalness: 0.4 }),
     logs: new THREE.MeshStandardMaterial({ map: TX.woodTexture(), roughness: 0.9, color: 0xd9b48a }),
     paint: new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.6, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }),
     yellow: new THREE.MeshStandardMaterial({ color: 0xffd23a, roughness: 0.6, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }),
   };
-  M.stone.map = M.stone.map.clone(); M.stone.map.needsUpdate = true;
   const skirtDirt = new THREE.MeshStandardMaterial({ map: TX.dirtTexture(), roughness: 1, side: THREE.DoubleSide });
-  for (const k of ['wood', 'asphalt', 'dirt', 'stone', 'logs']) M[k].side = THREE.DoubleSide;
+  for (const k of ['wood', 'asphalt', 'dirt', 'cobble', 'logs']) M[k].side = THREE.DoubleSide;
 
   // ------------------------------------------------------------ faixas (pista)
-  const classOf = (i) => (BRIDGE[i] ? 'wood' : SURFACE[i] === 2 ? 'dirt' : SURFACE[i] === 1 ? 'wood' : 'asphalt');
+  const classOf = (i) => (BRIDGE[i] ? 'wood' : SURFACE[i] === 3 ? 'cobble' : SURFACE[i] === 2 ? 'dirt' : SURFACE[i] === 1 ? 'wood' : 'asphalt');
   const runs = [];
   {
     let s = 0;
@@ -104,13 +110,14 @@ export function buildWorld(track, quality = 'high') {
 
   for (const r of runs) {
     const half = r.cls === 'wood' && BRIDGE[r.a] ? edge : hw;
-    add(strip(r.a, r.b, -half, half, 0.02, 6.4, 6.4), M[r.cls]);
+    add(strip(r.a, r.b, -half, half, 0.02, r.cls === 'dirt' ? 12.8 : r.cls === 'cobble' ? 12.8 : 6.4, r.cls === 'cobble' ? 12.8 : 6.4), M[r.cls]);
     if (r.cls !== 'wood' || !BRIDGE[r.a]) {
       // berma de pedra entre a pista e o muro
-      add(strip(r.a, r.b, hw, edge, 0.01, 6.4, 6.4), M.stone);
-      add(strip(r.a, r.b, -edge, -hw, 0.01, 6.4, 6.4), M.stone);
+      add(strip(r.a, r.b, hw, edge, 0.01, 12.8, 6.4), M.dirt);
+      add(strip(r.a, r.b, -edge, -hw, 0.01, 12.8, 6.4), M.dirt);
     }
-    // linhas laterais brancas
+    // linhas laterais brancas (a estrada de terra nao tem)
+    if (r.cls === 'dirt') continue;
     add(strip(r.a, r.b, hw - 1.3, hw - 0.8, 0.06, 1, 1, 2), M.paint, { receive: false });
     add(strip(r.a, r.b, -hw + 0.8, -hw + 1.3, 0.06, 1, 1, 2), M.paint, { receive: false });
   }
@@ -120,7 +127,7 @@ export function buildWorld(track, quality = 'high') {
     let vi = 0;
     for (let s = 0; s < L; s += 12) {
       const i0 = Math.floor(s / ds) % N;
-      if (BRIDGE[i0] || SURFACE[i0] === 1) continue;
+      if (BRIDGE[i0] || SURFACE[i0] !== 0) continue;
       const i1 = (i0 + 5) % N;
       const w = 0.3;
       for (const [k, sg] of [[i0, 1], [i1, 1]]) {
@@ -287,7 +294,7 @@ export function buildWorld(track, quality = 'high') {
   // ------------------------------------------------------------ muros por trecho
   {
     const posts = [], rails = [], diags = [];
-    const lposts = [], lrails = [];
+    const lposts = [], lrails = [], pickets = [];
     const H = 6.2, seg = Math.round(6 / ds);
     for (const r of runs) {
       const isBridge = !!BRIDGE[r.a];
@@ -309,9 +316,16 @@ export function buildWorld(track, quality = 'high') {
             diags.push(matrix((x0 + x1) / 2, y0 + H / 2 + 0.25, (z0 + z1) / 2, yaw, dl, 0.5, 0.5, flip * Math.atan2(H - 0.5, len)));
             flip = -flip;
           } else {
-            lposts.push(matrix(x0, y0 + 1.1, z0, yaw, 0.8, 2.2, 0.8));
-            lrails.push(matrix((x0 + x1) / 2, y0 + 0.6, (z0 + z1) / 2, yaw, len, 0.8, 0.8));
-            lrails.push(matrix((x0 + x1) / 2, y0 + 1.6, (z0 + z1) / 2, yaw, len, 0.8, 0.8));
+            const bk = { x: (x0 + x1) / 2, z: (z0 + z1) / 2, y: y0, kind: 'iron', broken: false, parts: [['lposts', lposts.length], ['lrails', lrails.length], ['lrails', lrails.length + 1]] };
+            lposts.push(matrix(x0, y0 + 1.8, z0, yaw, 0.38, 3.6, 0.38));
+            lrails.push(matrix((x0 + x1) / 2, y0 + 3.0, (z0 + z1) / 2, yaw, len, 0.16, 0.16));
+            lrails.push(matrix((x0 + x1) / 2, y0 + 1.1, (z0 + z1) / 2, yaw, len, 0.16, 0.16));
+            for (let q = 0.0; q < 1; q += 1 / 3) {
+              const px = x0 + dx * q, pz = z0 + dz * q;
+              bk.parts.push(['pickets', pickets.length]);
+              pickets.push(matrix(px, y0 + 1.5, pz, yaw, 0.12, 3.0, 0.12));
+            }
+            breakables.push(bk);
           }
         }
       }
@@ -323,8 +337,9 @@ export function buildWorld(track, quality = 'high') {
       group.add(instanced(box, M.steel, diags));
     }
     if (lposts.length) {
-      group.add(instanced(box, M.logs, lposts));
-      group.add(instanced(new THREE.CylinderGeometry(0.42, 0.42, 1, 8).rotateZ(Math.PI / 2), M.logs, lrails));
+      group.add((meshes.lposts = instanced(box, M.iron, lposts)));
+      group.add((meshes.lrails = instanced(box, M.iron, lrails)));
+      group.add((meshes.pickets = instanced(box, M.iron, pickets)));
     }
   }
 
@@ -355,9 +370,9 @@ export function buildWorld(track, quality = 'high') {
         const wx = cx + c * lx + -s * lz, wz = cz + s * lx + c * lz;
         slots.push(matrix(wx, y, wz, yaw, sx, 0.05, sz));
       };
-      bar(-2.6, 0, 0.3, 3.4);
-      bar(0, -1.6, 5.4, 0.3);
-      bar(0, 1.6, 5.4, 0.3);
+      bar(-2.3, 0, 0.25, 3.3);
+      bar(-0.1, -1.6, 4.4, 0.25);
+      bar(-0.1, 1.6, 4.4, 0.25);
     }
     group.add(instanced(new THREE.BoxGeometry(1, 1, 1), M.paint, slots, { cast: false, receive: false }));
 
@@ -369,7 +384,30 @@ export function buildWorld(track, quality = 'high') {
   }
 
   // ------------------------------------------------------------ cenario
-  addScenery(group, track, { rng, low, bridgeRuns, W, edge });
+  addScenery(group, track, { rng, low, bridgeRuns, W, edge, breakables, meshes });
+
+  // montanhas rochosas laranja ao fundo
+  {
+    let cx = 0, cz = 0;
+    for (let i = 0; i < N; i += 8) { cx += X[i]; cz += Z[i]; }
+    cx /= Math.ceil(N / 8); cz /= Math.ceil(N / 8);
+    const mats = [];
+    const peaks = [];
+    for (let i = 0; i < (low ? 8 : 16); i++) {
+      const a = (i / (low ? 8 : 16)) * Math.PI * 2 + rng() * 0.3, r = 520 + rng() * 120;
+      const h = 90 + rng() * 120, w = 110 + rng() * 80;
+      peaks.push([cx + Math.cos(a) * r, cz + Math.sin(a) * r, h, w]);
+    }
+    const mg = mergeGeometries(peaks.map(([x, z, h, w], i) => {
+      const g = new THREE.ConeGeometry(w, h, 7, 3).translate(x, h / 2 - 4, z);
+      const pos = g.getAttribute('position');
+      for (let k = 0; k < pos.count; k++) pos.setXYZ(k, pos.getX(k) + Math.sin(k * 12.9898 + i) * 7, pos.getY(k), pos.getZ(k) + Math.cos(k * 78.233 + i) * 7);
+      g.computeVertexNormals();
+      return colored(g, [0xc98a3c, 0xb8742f, 0xd89b4a][i % 3]);
+    }));
+    group.add(new THREE.Mesh(mg, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1, flatShading: true })));
+    void mats;
+  }
 
   // nuvens
   {
@@ -383,17 +421,46 @@ export function buildWorld(track, quality = 'high') {
     }
   }
 
+  const bkGrid = new Map();
+  for (const bk of breakables) {
+    const k = Math.floor(bk.x / BK_CELL) * 100003 + Math.floor(bk.z / BK_CELL);
+    if (!bkGrid.has(k)) bkGrid.set(k, []);
+    bkGrid.get(k).push(bk);
+  }
+
   return {
     group,
     gantry,
-    update(t) {
+    /** Anima a agua e quebra cercas atravessadas por carros. Retorna os trechos quebrados ({x,z,y,kind,dx,dz,speed}). */
+    update(t, cars = []) {
       waterTex.offset.set(t * 0.015, t * 0.01);
+      const broke = [];
+      for (const c of cars) {
+        if (!(c.alive || c.state === 'wreck') || c.speed < 4) continue;
+        const cx = Math.floor(c.x / BK_CELL), cz = Math.floor(c.z / BK_CELL);
+        for (let a = -1; a <= 1; a++) for (let b = -1; b <= 1; b++) {
+          const list = bkGrid.get((cx + a) * 100003 + (cz + b));
+          if (!list) continue;
+          for (const bk of list) {
+            if (bk.broken || Math.hypot(bk.x - c.x, bk.z - c.z) > 3.3) continue;
+            bk.broken = true;
+            for (const [tag, idx] of bk.parts) {
+              const mesh = meshes[tag];
+              if (mesh) { mesh.setMatrixAt(idx, ZERO); mesh.instanceMatrix.needsUpdate = true; }
+            }
+            const sp = c.speed || 1;
+            broke.push({ x: bk.x, z: bk.z, y: bk.y, kind: bk.kind, dx: c.vx / sp, dz: c.vz / sp, speed: c.speed });
+          }
+        }
+      }
+      return broke;
     },
   };
 }
 
 // ---------------------------------------------------------------- decoracao
-function addScenery(group, track, { rng, low, bridgeRuns, W, edge }) {
+function addScenery(group, track, { rng, low, bridgeRuns, W, edge, breakables, meshes }) {
+  const sc0 = track.scenery;
   const { N, X, Z, NX, NZ, ELEV, BRIDGE } = track;
   // hash espacial das amostras da pista para medir distancia
   const cell = 24, grid = new Map();
@@ -436,22 +503,22 @@ function addScenery(group, track, { rng, low, bridgeRuns, W, edge }) {
   const tint = new THREE.Color();
 
   // arvores redondas (copa dupla + tronco) e pinheiros
-  const trunkG = colored(new THREE.CylinderGeometry(0.5, 0.75, 4, 7).translate(0, 2, 0), 0x7a4e2b);
+  const trunkG = colored(new THREE.CylinderGeometry(0.85, 1.25, 6, 7).translate(0, 3, 0), 0x7a4e2b);
   const crownG = mergeGeometries([
-    colored(new THREE.IcosahedronGeometry(3.4, 1).translate(0, 6.2, 0), 0xffffff),
-    colored(new THREE.IcosahedronGeometry(2.5, 1).translate(1.4, 8.3, 0.5), 0xffffff),
+    colored(new THREE.IcosahedronGeometry(4.6, 1).translate(0, 8.4, 0), 0xffffff),
+    colored(new THREE.IcosahedronGeometry(3.4, 1).translate(3.2, 10.4, 1), 0xffffff),
+    colored(new THREE.IcosahedronGeometry(3.2, 1).translate(-2.8, 10.0, -1.4), 0xffffff),
   ]);
   const treeM = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85, flatShading: true });
-  const trees = spots(Math.round(300 * f), 2);
+  const trees = sc0.trees;
   const crown = new THREE.InstancedMesh(crownG, new THREE.MeshStandardMaterial({ roughness: 0.85, flatShading: true }), trees.length);
   const trunk = new THREE.InstancedMesh(trunkG, treeM, trees.length);
   crown.castShadow = trunk.castShadow = true;
-  trees.forEach(([x, z], i) => {
-    const s = 0.8 + rng() * 1.1;
-    const m = matrix(x, 0, z, rng() * 6.28, s, s * (0.9 + rng() * 0.4), s);
+  trees.forEach((t, i) => {
+    const m = matrix(t.x, 0, t.z, t.yaw, t.s, t.sy, t.s);
     crown.setMatrixAt(i, m);
     trunk.setMatrixAt(i, m);
-    tint.setHSL(0.26 + rng() * 0.07, 0.62, 0.34 + rng() * 0.14);
+    tint.setHSL(0.26 + t.hue * 0.07, 0.62, 0.34 + t.light * 0.14);
     crown.setColorAt(i, tint);
   });
   group.add(crown, trunk);
@@ -486,12 +553,11 @@ function addScenery(group, track, { rng, low, bridgeRuns, W, edge }) {
     });
     bush.castShadow = true;
     group.add(bush);
-    const rocks = spots(Math.round(90 * f), -3);
+    const rocks = sc0.rocks;
     const rk = new THREE.InstancedMesh(new THREE.DodecahedronGeometry(1.6, 0), new THREE.MeshStandardMaterial({ roughness: 0.95, flatShading: true }), rocks.length);
-    rocks.forEach(([x, z], i) => {
-      const s = 0.5 + rng() * 1.6;
-      rk.setMatrixAt(i, matrix(x, 0.2, z, rng() * 6, s * 1.3, s * 0.8, s));
-      tint.setHSL(0.08, 0.05, 0.4 + rng() * 0.2);
+    rocks.forEach((r, i) => {
+      rk.setMatrixAt(i, matrix(r.x, 0.2, r.z, r.yaw, r.s * 1.3, r.s * 0.8, r.s));
+      tint.setHSL(0.08, 0.05, 0.4 + r.tone * 0.2);
       rk.setColorAt(i, tint);
     });
     rk.castShadow = true;
@@ -536,6 +602,7 @@ function addScenery(group, track, { rng, low, bridgeRuns, W, edge }) {
         const o = (edge + 6) * sg;
         const x0 = X[i] + NX[i] * o, z0 = Z[i] + NZ[i] * o, x1 = X[j] + NX[j] * o, z1 = Z[j] + NZ[j] * o;
         const yaw = Math.atan2(z1 - z0, x1 - x0), len = Math.hypot(x1 - x0, z1 - z0);
+        breakables.push({ x: (x0 + x1) / 2, z: (z0 + z1) / 2, y: 0, kind: 'wood', broken: false, parts: [['wposts', posts.length], ['wposts', posts.length + 1], ['wrailsA', railsA.length], ['wrailsB', railsB.length]] });
         posts.push(matrix(x0, 0.85, z0, yaw, 0.28, 1.7, 0.16));
         posts.push(matrix((x0 + x1) / 2, 0.75, (z0 + z1) / 2, yaw, 0.22, 1.5, 0.12));
         railsA.push(matrix((x0 + x1) / 2, 0.55, (z0 + z1) / 2, yaw, len, 0.14, 0.1));
@@ -544,14 +611,14 @@ function addScenery(group, track, { rng, low, bridgeRuns, W, edge }) {
     }
     const white = new THREE.MeshStandardMaterial({ color: 0xf6f3ea, roughness: 0.7 });
     const box = new THREE.BoxGeometry(1, 1, 1);
-    group.add(instanced(box, white, posts, { receive: false }));
-    group.add(instanced(box, white, railsA, { receive: false }));
-    group.add(instanced(box, white, railsB, { receive: false }));
+    group.add((meshes.wposts = instanced(box, white, posts, { receive: false })));
+    group.add((meshes.wrailsA = instanced(box, white, railsA, { receive: false })));
+    group.add((meshes.wrailsB = instanced(box, white, railsB, { receive: false })));
   }
 
   // casinhas (tijolo ou parede branca), com janela
   {
-    const houses = spots(Math.round(22 * f), 14, edge + 110);
+    const houses = sc0.houses;
     const bodyG = new THREE.BoxGeometry(11, 7, 9).translate(0, 3.5, 0);
     const roofG = new THREE.ConeGeometry(9, 5, 4).rotateY(Math.PI / 4).translate(0, 9.5, 0);
     const brick = new THREE.InstancedMesh(bodyG, new THREE.MeshStandardMaterial({ map: TX.brickTexture(), roughness: 0.85 }), houses.length);
@@ -559,10 +626,10 @@ function addScenery(group, track, { rng, low, bridgeRuns, W, edge }) {
     const roofs = new THREE.InstancedMesh(roofG, new THREE.MeshStandardMaterial({ map: TX.roofTexture(), roughness: 0.8 }), houses.length);
     const wins = new THREE.InstancedMesh(new THREE.PlaneGeometry(2.6, 2.6), new THREE.MeshStandardMaterial({ map: TX.windowTexture(), roughness: 0.6 }), houses.length * 2);
     let bi = 0, wi = 0, wn = 0;
-    houses.forEach(([x, z]) => {
-      const yaw = Math.floor(rng() * 4) * (Math.PI / 2);
+    houses.forEach((h) => {
+      const { x, z, yaw } = h;
       const m = matrix(x, 0, z, yaw, 1, 1, 1);
-      if (rng() < 0.5) brick.setMatrixAt(bi++, m); else white.setMatrixAt(wi++, m);
+      if (h.brick) brick.setMatrixAt(bi++, m); else white.setMatrixAt(wi++, m);
       roofs.setMatrixAt(wn, m);
       for (const off of [-2.6, 2.6]) {
         const c = Math.cos(yaw), s = Math.sin(yaw);

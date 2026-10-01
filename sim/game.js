@@ -2,7 +2,11 @@
 import { makeCar, placeCar, stepCar, updateProgress, collideCars, startFall, DT, CAR } from './car.js';
 import { ChaseCamera } from './camera.js';
 import { Items } from './items.js';
+import { buildScenery } from './scenery.js';
 import { makeRng } from './rng.js';
+
+/** Rampa do retardatario: a partir de `from` (ny na tela) comeca a acelerar, ate o maximo em `to`. */
+export const CATCHUP = { from: -0.2, to: -0.5 };
 
 export const RULES = {
   startPoints: 5,
@@ -12,14 +16,14 @@ export const RULES = {
   cutGrace: 1.0, // segundos apos o GO sem corte de camera
   zoomIn: 0.3, // zoom rapido no sobrevivente
   hold: 0.5, // tempo mostrando o sobrevivente
-  gridRowGap: 8,
+  gridRowGap: 6.5,
   gridBehind: 10, // "um pouco antes" de onde o sobrevivente ficou
 };
 
 /** Posicao do i-esimo carro na grade: distancia atras da frente e lado (-1/+1). */
 export function gridSlot(i) {
   const row = Math.floor(i / 2), col = i % 2;
-  return { back: row * RULES.gridRowGap + col * 3, side: col ? 1 : -1 };
+  return { back: row * RULES.gridRowGap + col * 2.5, side: col ? 1 : -1 };
 }
 
 /** Aplica a pontuacao da rodada. `deaths` = ids na ordem em que morreram. Retorna {id: delta}. */
@@ -43,6 +47,7 @@ export class Game {
    */
   constructor(players, opts) {
     this.track = opts.track;
+    if (!this.track.scenery) this.track.scenery = buildScenery(this.track);
     this.cup = opts.cup || 'super';
     this.rng = makeRng(opts.seed ?? 1234);
     this.cars = players.map((p) => makeCar(p.id, p));
@@ -61,7 +66,17 @@ export class Game {
     this.winner = null;
     this.endReason = null;
     this.countN = RULES.countdown;
+    // modo debug (so o host liga): corrida infinita, sem corte, carros imortais
+    this.debug = { infinite: false, noCut: false };
     this.startRound(-4);
+  }
+
+  /** Quao perto da explosao por sair da pista (1 = explode). So vale onde o terreno e aberto. */
+  offroadRatio(car) {
+    const t = this.track;
+    if (!car.near || !t.def.openLand || t.hardWall(car.near.idx)) return 0;
+    const out = Math.abs(car.near.d) - (t.halfWidth + t.verge);
+    return Math.max(0, out) / CAR.offroadMax;
   }
 
   carById(id) { return this.cars.find((c) => c.id === id) || null; }
@@ -106,24 +121,10 @@ export class Game {
     return best ? best.id : -1;
   }
 
-  /** Alvo do missil: carro imediatamente a frente no ranking (ou o mais proximo na frente, se for o lider). */
-  missileTarget(owner) {
-    const rank = this.ranking();
-    const i = rank.findIndex((c) => c.id === owner.id);
-    if (i > 0) return rank[i - 1].id;
-    let best = null, bd = 80;
-    const fx = Math.cos(owner.h), fz = Math.sin(owner.h);
-    for (const c of rank) {
-      if (c.id === owner.id) continue;
-      const dx = c.x - owner.x, dz = c.z - owner.z, d = Math.hypot(dx, dz);
-      if (d < bd && (dx * fx + dz * fz) / (d || 1) > 0.5) { bd = d; best = c; }
-    }
-    return best ? best.id : -1;
-  }
-
-  setInput(id, steer, fire) {
+  setInput(id, steer, fire, rev = false) {
     const c = this.carById(id);
     if (!c) return;
+    c.revIn = !!rev;
     c.steer = Math.max(-1, Math.min(1, steer));
     if (fire) c.wantFire = true;
   }
@@ -134,8 +135,32 @@ export class Game {
     car.item = null;
     this.deaths.push(car.id);
     this.events.push({ type: 'dead', car: car.id, cause, x: car.x, z: car.z });
-    if (car.state !== 'falling') car.state = 'dead';
-    if (car.state === 'dead') car.hidden = true;
+    if (car.state === 'falling') return; // cai na agua: some depois da animacao
+    // qualquer outra morte deixa uma CARCACA na pista ate o proximo spawn
+    car.state = 'wreck';
+    car.wreckT = 0;
+    car.hidden = false;
+    car.locked = false;
+    car.boost = 0;
+    car.stun = 0;
+    car.vy = Math.max(car.vy, 9);
+    car.y = Math.max(car.y, 0.02);
+    car.spinVel = (car.id % 2 ? 1 : -1) * 6;
+    car.pitchVel = (car.id % 3 - 1 || 1) * 7;
+    car.rollVel = (car.id % 2 ? 1 : -1) * 9;
+    car.revIn = false;
+  }
+
+  /** Explode o carro (mina, missil, camera, longe da pista): elimina e deixa a carcaca. */
+  explodeCar(car, cause, by = -1, ex = car.x, ez = car.z) {
+    if (!car.alive || car.state === 'falling' || car.god) return;
+    this.events.push({ type: 'explode', kind: cause, x: car.x, z: car.z, owner: by, car: car.id });
+    // a onda de choque joga o carro para longe do epicentro
+    const dx = car.x - ex, dz = car.z - ez, d = Math.hypot(dx, dz);
+    const nx = d > 0.05 ? dx / d : Math.cos(car.h), nz = d > 0.05 ? dz / d : Math.sin(car.h);
+    car.vx = car.vx * 0.5 + nx * 13;
+    car.vz = car.vz * 0.5 + nz * 13;
+    this.kill(car, cause);
   }
 
   /** Avanca a simulacao `dt` segundos reais em passos fixos. */
@@ -182,15 +207,21 @@ export class Game {
 
   stepRacing(dt) {
     this.time += dt;
+    this.updateCatchup(dt);
     for (const c of this.cars) {
       if (c.wantFire) {
         c.wantFire = false;
         this.items.use(c, this);
       }
       this.physics(c, dt);
+      if (c.alive && c.near) {
+        // rio ao lado da ponte: afunda; longe demais da estrada: explode
+        if (c.state !== 'falling' && c.y <= 0.3 && this.track.inWater(c.near)) startFall(c, this.events, 'fall');
+        if (c.state !== 'falling' && !this.debug.noCut && this.offroadRatio(c) > 1) this.explodeCar(c, 'offroad');
+      }
       if (c.alive && c.state === 'falling') this.kill(c, 'fall');
     }
-    const live = this.cars.filter((c) => c.alive);
+    const live = this.cars.filter((c) => c.alive || c.state === 'wreck');
     for (let i = 0; i < live.length; i++) {
       for (let j = i + 1; j < live.length; j++) collideCars(live[i], live[j], this.events);
     }
@@ -198,12 +229,14 @@ export class Game {
 
     this.frameCamera();
     // corte pelo enquadramento da camera
-    if (this.time > RULES.cutGrace) {
+    if (this.time > RULES.cutGrace && !this.debug.noCut) {
+      const lead = this.leaderId(); // o lider nunca e cortado
       for (const c of this.cars) {
-        if (c.alive && this.camera.isCut(c.x, c.z)) this.kill(c, 'cut');
+        if (c.alive && c.id !== lead && this.camera.isCut(c.x, c.z)) this.explodeCar(c, 'cut');
       }
     }
 
+    if (this.debug.infinite) { this.debugRespawn(); return; } // debug: corrida infinita
     // fim de partida por voltas
     let leader = null;
     for (const c of this.cars) if (c.alive && (!leader || c.progress > leader.progress)) leader = c;
@@ -212,6 +245,40 @@ export class Game {
     }
     // fim de rodada: so avaliado em RACING (evita falso vencedor no respawn)
     if (this.cars.length >= 2 && this.cars.filter((c) => c.alive).length <= 1) this.endRound();
+  }
+
+  /** Retardatario perto de sair do quadro ganha velocidade ate voltar para perto do centro da tela. */
+  updateCatchup(dt) {
+    const lead = this.leaderId();
+    const o = this._o || (this._o = { nx: 0, ny: 0, d: 0 });
+    const cam = this.camera;
+    for (const c of this.cars) {
+      let want = 0;
+      if (c.alive && c.state === 'run' && c.id !== lead) {
+        cam.project(c.x, 0.5, c.z, o);
+        const ny = o.d > 0.1 ? o.ny : -9;
+        want = Math.max(0, Math.min(1, (CATCHUP.from - ny) / (CATCHUP.from - CATCHUP.to)));
+      }
+      c.catchup += (want - c.catchup) * Math.min(1, 5 * dt);
+    }
+  }
+
+  /** Debug: carros mortos renascem onde estavam, para a corrida nunca acabar. */
+  debugRespawn() {
+    this.deaths.length = 0;
+    for (const c of this.cars) {
+      const gone = c.state === 'dead' || (c.state === 'wreck' && c.wreckT > 2.2);
+      if (c.alive || !gone) continue;
+      // renasce junto do pelotao (se renascesse onde morreu, a camera o cortaria de novo)
+      const alive = this.cars.filter((o) => o.alive);
+      const at = alive.length ? alive.reduce((m, o) => Math.max(m, o.progress), -1e9) - 8 : c.progress;
+      placeCar(c, this.track, at, ((c.id % 3) - 1) * this.track.halfWidth * 0.3);
+      c.hidden = false;
+      c.locked = false;
+      c.state = 'run';
+      c.vx = Math.cos(c.h) * 14;
+      c.vz = Math.sin(c.h) * 14;
+    }
   }
 
   endRound() {

@@ -9,6 +9,7 @@ export const HOST_INPUT = 0x81; // servidor -> host
 
 export const BTN_FIRE = 1;
 export const BTN_AWAY = 2;
+export const BTN_REV = 4; // as duas setas juntas = re em linha reta
 
 // Cores dos 8 carros (tons primarios/secundarios puros para leitura periferica).
 export const COLORS = [

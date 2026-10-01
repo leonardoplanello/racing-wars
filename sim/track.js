@@ -1,9 +1,10 @@
 // Pista: spline fechada amostrada uniformemente. Coordenadas: x para a direita, z para baixo (tela).
 // Rumo h: frente = (cos h, sin h); aumentar h = virar para a direita. Normal "direita" = (-tz, tx).
 
-export const SURF = { ASPHALT: 0, WOOD: 1, DIRT: 2 };
-export const SURF_GRIP = [10, 6.5, 3.8];
-export const SURF_SPEED = [1, 0.97, 0.93];
+export const SURF = { ASPHALT: 0, WOOD: 1, DIRT: 2, STONE: 3 };
+// coeficiente de atrito por superficie (escala a aderencia dos pneus) e fator da velocidade de cruzeiro
+export const SURF_MU = [1.0, 0.85, 0.85, 0.95];
+export const SURF_SPEED = [1, 0.98, 0.97, 1];
 
 function catmull(p0, p1, p2, p3, t) {
   const t2 = t * t;
@@ -57,7 +58,7 @@ export function buildTrack(def, spacing = 1) {
     tx /= l; tz /= l;
     TX[i] = tx; TZ[i] = tz; NX[i] = -tz; NZ[i] = tx;
   }
-  const SURFACE = new Uint8Array(N);
+  const SURFACE = new Uint8Array(N).fill(def.baseSurface ?? 0);
   const BRIDGE = new Uint8Array(N);
   // marca um intervalo (fracao da volta); from > to significa que passa pela linha de largada
   const mark = (from, to, fn) => {
@@ -157,7 +158,14 @@ export function buildTrack(def, spacing = 1) {
       const i = Math.floor(w) % N, j = (i + 1) % N, f = w - Math.floor(w);
       return ELEV[i] + (ELEV[j] - ELEV[i]) * f;
     },
-    wallStyle(i) { return BRIDGE[i] ? 'truss' : 'logs'; },
+    wallStyle(i) { return BRIDGE[i] ? 'truss' : 'fence'; },
+    /** Muro solido neste trecho? Em pistas com `openLand`, so a ponte tem muro; em terra da para sair. */
+    hardWall(i) { return def.openLand ? BRIDGE[i] === 1 : true; },
+    riverHalf: def.riverHalf ?? 34,
+    /** O ponto (dado seu `near`) esta dentro do rio ao lado da ponte? */
+    inWater(near) {
+      return def.openLand && BRIDGE[near.idx] === 1 && Math.abs(near.d) > this.halfWidth + this.verge + 0.5 && Math.abs(near.d) < (def.riverHalf ?? 34);
+    },
     /** Menor raio de curvatura (unidades) — usado nos testes. */
     minRadius() {
       let m = Infinity;

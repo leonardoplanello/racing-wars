@@ -25,9 +25,10 @@ No Windows também dá para dar dois cliques em `Iniciar Racing Wars.bat`.
 - Outra porta: `PORT=4000 npm start` (PowerShell: `$env:PORT=4000; npm start`).
 
 ## Controles (celular, modo paisagem)
-- **Metade esquerda**: direção "cega". Encoste o dedo em qualquer ponto e arraste para os lados.
-- **Metade direita**: toque em qualquer ponto para usar o item guardado.
-- O carro acelera sozinho.
+- **Botão de ação** (faixa de cima): toque para usar o poder guardado.
+- **Seta ◀ (esquerda) e seta ▶ (direita)** (embaixo): segure para esterçar.
+- **As duas setas juntas = ré**, em linha reta.
+- O carro acelera sozinho. No teclado do host: ← → esterçam, as duas juntas dão ré, espaço usa o poder.
 
 ## Documentação
 - [docs/REGRAS.md](docs/REGRAS.md): regras, pontuação, itens.

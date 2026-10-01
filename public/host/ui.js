@@ -116,12 +116,7 @@ export class UI {
     this.labelEls.clear();
     this.dangerEls.clear();
     for (const c of game.cars) {
-      const l = document.createElement('div');
-      l.className = 'lbl';
-      l.style.color = COLORS[c.color].hex;
-      l.textContent = names.get(c.id) || '';
-      this.labelsEl.appendChild(l);
-      this.labelEls.set(c.id, l);
+      this.labelEls.set(c.id, null); // sem nametags sobre os carros
       const d = document.createElement('div');
       d.className = 'danger';
       d.style.color = d.style.borderColor = COLORS[c.color].hex;
@@ -159,8 +154,8 @@ export class UI {
       const pos = order.indexOf(c.id);
       ch.el.style.order = pos;
       ch.rk.textContent = ord[pos] || '';
-      const ic = c.alive && c.item ? ITEM_ICON[c.item] : '';
-      if (ch.it.textContent !== ic) ch.it.textContent = ic;
+      const ic = c.alive && c.item ? c.item : '';
+      if (ch.itKind !== ic) { ch.itKind = ic; if (ic === 'mine') ch.it.innerHTML = '<span class="mine-ico"></span>'; else ch.it.textContent = ic ? ITEM_ICON[ic] : ''; }
     }
     const lead = game.ranking()[0];
     const lap = lead ? Math.min(game.lapOf(lead), 3) : 1;
@@ -180,18 +175,11 @@ export class UI {
   updateLabels(game, project, cam) {
     const W = innerWidth, H = innerHeight;
     for (const c of game.cars) {
-      const l = this.labelEls.get(c.id), d = this.dangerEls.get(c.id);
-      if (!l) continue;
-      if (!c.alive || c.hidden) { l.style.display = 'none'; d.style.display = 'none'; continue; }
-      const p = project(c.x, 5.2 + Math.max(0, c.y), c.z);
-      if (p.behind || p.x < -40 || p.x > W + 40 || p.y < -40 || p.y > H + 40) l.style.display = 'none';
-      else {
-        l.style.display = 'block';
-        l.style.left = p.x + 'px';
-        l.style.top = p.y + 'px';
-      }
+      const d = this.dangerEls.get(c.id);
+      if (!d) continue;
+      if (!c.alive || c.hidden) { d.style.display = 'none'; continue; }
       // perigo: o carro esta perto de ficar para tras (borda de baixo) ou de sair pelos lados
-      const r = game.state === 'RACING' ? cam.edgeRatio(c.x, c.z) : 0;
+      const r = game.state === 'RACING' ? Math.max(cam.edgeRatio(c.x, c.z), game.offroadRatio(c)) : 0;
       if (r > 0.72) {
         const q = project(c.x, 0, c.z);
         const m = 30;

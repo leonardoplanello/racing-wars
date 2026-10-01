@@ -17,7 +17,7 @@ export function createScene(canvas, quality = 'high') {
 
   const scene = new THREE.Scene();
   scene.background = skyTexture();
-  scene.fog = new THREE.Fog(0xcfeaff, 140, 520);
+  scene.fog = new THREE.Fog(0xcfeaff, 190, 820);
 
   scene.add(new THREE.HemisphereLight(0xcfe8ff, 0x6b8a4a, 1.15));
   const sun = new THREE.DirectionalLight(0xfff1d0, 2.6);
@@ -32,7 +32,7 @@ export function createScene(canvas, quality = 'high') {
   }
   scene.add(sun, sun.target);
 
-  const camera = new THREE.PerspectiveCamera(CAMERA.fov, 16 / 9, 0.5, 900);
+  const camera = new THREE.PerspectiveCamera(CAMERA.fov, 16 / 9, 0.5, 1400);
   const size = { w: 1, h: 1, aspect: 16 / 9 };
 
   function resize() {

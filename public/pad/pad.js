@@ -1,5 +1,5 @@
 // Controle do celular: direcao cega (metade esquerda) + item (metade direita).
-import { encodeInput, BTN_FIRE, BTN_AWAY } from '/shared/protocol.js';
+import { encodeInput, BTN_FIRE, BTN_AWAY, BTN_REV } from '/shared/protocol.js';
 
 const $ = (id) => document.getElementById(id);
 const params = new URLSearchParams(location.search);
@@ -8,13 +8,19 @@ const store = (k, v) => { try { if (v === undefined) return localStorage.getItem
 let clientId = store('rw-cid');
 if (!clientId) { clientId = Math.random().toString(36).slice(2) + Date.now().toString(36); store('rw-cid', clientId); }
 
-const S = { ws: null, room: '', joined: false, mode: 'join', master: false, retry: 0, steer: 0, fire: false, seq: 0, rtt: 0, timer: 0 };
+const S = { ws: null, room: '', joined: false, mode: 'join', master: false, retry: 0, steer: 0, fire: false, seq: 0, rtt: 0, timer: 0, rev: false };
 const buf = new Uint8Array(4);
 
 // ------------------------------------------------------------------ rede
 function connect() {
+  const cfg = window.RW || {};
+  if (cfg.static && !cfg.relay) {
+    $('err').textContent = 'Este site não tem servidor para os celulares. Rode o jogo localmente (npm start).';
+    S.room = '';
+    return;
+  }
   const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-  const ws = new WebSocket(`${proto}//${location.host}/ws`);
+  const ws = new WebSocket(cfg.relay || `${proto}//${location.host}/ws`);
   S.ws = ws;
   ws.onopen = () => {
     S.retry = 0;
@@ -61,18 +67,19 @@ function applyState(m) {
   document.body.style.background = m.color;
   document.documentElement.style.setProperty('--bg', m.color);
   $('who').textContent = m.name;
-  $('pts').textContent = m.pts !== undefined && m.mode !== 'menu' && m.mode !== 'wait' ? `${m.pts} pts` : '';
+  $('pts').textContent = m.pts !== undefined && m.mode !== 'menu' && m.mode !== 'wait' && m.mode !== 'dead' ? `${m.pts} pts` : '';
   if (m.mode === 'drive') {
     $('drive').hidden = false; $('menu').hidden = true; $('msg').hidden = true;
     const [label, id] = (m.item || '').split('|');
-    $('ico').textContent = { nitro: '🚀', mine: '💣', missile: '🎯', whomp: '🧲' }[id] || '';
+    if (id === 'mine') $('ico').innerHTML = '<span class="mine-ico"></span>'; else $('ico').textContent = { nitro: '🚀', missile: '🎯', whomp: '🧲' }[id] || '';
     $('itl').textContent = label || '';
     $('firehint').textContent = m.item ? 'TOQUE PARA USAR' : 'SEM ITEM';
+    $('act').style.opacity = m.item ? 1 : 0.6;
     S.mode = 'drive';
   } else if (m.mode === 'menu') {
     showMode('menu', m);
   } else if (m.mode === 'dead') {
-    showMode('msg', { title: 'ELIMINADO', sub: `${m.pts} pontos · aguarde a próxima rodada` });
+    showMode('dead');
   } else showMode('wait', { title: m.title || 'Aguardando…', sub: m.master ? '' : 'O Master controla os menus' });
 }
 
@@ -80,59 +87,74 @@ function showMode(kind, m) {
   $('drive').hidden = kind !== 'drive';
   $('menu').hidden = kind !== 'menu';
   $('msg').hidden = kind !== 'msg' && kind !== 'wait';
+  $('skull').hidden = kind !== 'dead';
   S.mode = kind;
-  S.steer = 0; S.fire = false;
+  S.steer = 0; S.fire = false; S.rev = false; S.held = { L: false, R: false }; touches.clear();
   if (kind === 'menu') $('mtitle').textContent = m.title || '';
   if (kind === 'msg' || kind === 'wait') $('msg').innerHTML = `${m.title || ''}${m.sub ? `<small>${m.sub}</small>` : ''}`;
 }
 
 // ------------------------------------------------------------------ toque
-const STEER_RANGE = 60, DEAD = 5;
-let steerId = null, anchorX = 0;
-const fireIds = new Set();
+// Layout: faixa de cima = ACAO (item); embaixo, metade esquerda = seta ESQUERDA, direita = seta DIREITA.
+// As duas setas juntas = RE em linha reta. Zonas grandes, por posicao (da para jogar sem olhar).
+const touches = new Map(); // id -> 'L' | 'R' | 'A'
+let lastFire = false;
+
+function zoneAt(x, y) {
+  const r = $('drive').getBoundingClientRect();
+  const actBottom = $('act').getBoundingClientRect().bottom;
+  if (y < actBottom + 4) return 'A';
+  return x < r.left + r.width / 2 ? 'L' : 'R';
+}
+
+function readTouches() {
+  let L = false, R = false, A = false;
+  for (const z of touches.values()) { if (z === 'L') L = true; else if (z === 'R') R = true; else A = true; }
+  S.held = { L, R };
+  S.rev = L && R;
+  S.fire = A;
+  $('btnL').classList.toggle('pressed', L);
+  $('btnR').classList.toggle('pressed', R);
+  $('act').classList.toggle('pressed', A);
+  if (A && !lastFire && navigator.vibrate) navigator.vibrate(8);
+  lastFire = A;
+}
 
 function sendInput() {
   if (!S.ws || S.ws.readyState !== 1 || !S.joined) return;
-  const buttons = (S.fire ? BTN_FIRE : 0) | (document.hidden ? BTN_AWAY : 0);
-  S.ws.send(encodeInput(S.steer, buttons, S.seq++, buf));
+  const buttons = (S.fire ? BTN_FIRE : 0) | (document.hidden ? BTN_AWAY : 0) | (S.rev ? BTN_REV : 0);
+  S.ws.send(encodeInput(S.rev ? 0 : S.steer, buttons, S.seq++, buf));
+}
+
+// volante digital suavizado: segurar uma seta leva a +-1 em ~0,25 s
+let lastTick = performance.now();
+function steerTick() {
+  const now = performance.now(), dt = Math.min(0.1, (now - lastTick) / 1000);
+  lastTick = now;
+  const held = S.held || { L: false, R: false };
+  const want = S.rev ? 0 : (held.R ? 1 : 0) - (held.L ? 1 : 0);
+  const rate = want === 0 ? 14 : 9; // volante rapido: vira com facilidade
+  S.steer += Math.max(-rate * dt, Math.min(rate * dt, want - S.steer));
+  if (Math.abs(S.steer) < 0.01) S.steer = 0;
 }
 
 function touchStart(e) {
   if (S.mode !== 'drive') return;
   e.preventDefault();
-  for (const t of e.changedTouches) {
-    if (t.clientX < innerWidth / 2) {
-      if (steerId === null) {
-        steerId = t.identifier; anchorX = t.clientX;
-        const a = $('anchor'); a.style.display = 'block'; a.style.left = t.clientX + 'px'; a.style.top = t.clientY + 'px'; a.style.setProperty('--dx', '0px');
-      }
-    } else {
-      fireIds.add(t.identifier);
-      S.fire = true;
-      $('drive').querySelector('.right').classList.add('flash');
-      if (navigator.vibrate) navigator.vibrate(8);
-    }
-  }
+  for (const t of e.changedTouches) touches.set(t.identifier, zoneAt(t.clientX, t.clientY));
+  readTouches();
   sendInput();
 }
 function touchMove(e) {
   if (S.mode !== 'drive') return;
   e.preventDefault();
-  for (const t of e.changedTouches) {
-    if (t.identifier === steerId) {
-      let dx = t.clientX - anchorX;
-      dx = Math.abs(dx) < DEAD ? 0 : dx - Math.sign(dx) * DEAD;
-      S.steer = Math.max(-1, Math.min(1, dx / (STEER_RANGE - DEAD)));
-      $('anchor').style.setProperty('--dx', S.steer * 30 + 'px');
-    }
-  }
+  for (const t of e.changedTouches) if (touches.has(t.identifier)) touches.set(t.identifier, zoneAt(t.clientX, t.clientY));
+  readTouches();
   sendInput();
 }
 function touchEnd(e) {
-  for (const t of e.changedTouches) {
-    if (t.identifier === steerId) { steerId = null; S.steer = 0; $('anchor').style.display = 'none'; }
-    if (fireIds.delete(t.identifier) && fireIds.size === 0) { S.fire = false; $('drive').querySelector('.right').classList.remove('flash'); }
-  }
+  for (const t of e.changedTouches) touches.delete(t.identifier);
+  readTouches();
   if (S.mode === 'drive') { e.preventDefault(); sendInput(); }
 }
 const opt = { passive: false };
@@ -143,20 +165,34 @@ document.addEventListener('touchcancel', touchEnd, opt);
 document.addEventListener('contextmenu', (e) => e.preventDefault());
 document.addEventListener('gesturestart', (e) => e.preventDefault());
 
-// mouse (teste no desktop): esquerda = arrastar, direita = clicar
+// mouse (teste no desktop): clicar nas zonas; tecla Espaco nao e usada aqui
 let mouseDown = false;
 document.addEventListener('mousedown', (e) => {
   if (S.mode !== 'drive') return;
-  if (e.clientX < innerWidth / 2) { mouseDown = true; anchorX = e.clientX; }
-  else { S.fire = true; sendInput(); }
+  mouseDown = true;
+  touches.set('m', zoneAt(e.clientX, e.clientY));
+  readTouches(); sendInput();
 });
 document.addEventListener('mousemove', (e) => {
   if (!mouseDown) return;
-  const dx = e.clientX - anchorX;
-  S.steer = Math.max(-1, Math.min(1, dx / STEER_RANGE));
-  sendInput();
+  touches.set('m', zoneAt(e.clientX, e.clientY));
+  readTouches(); sendInput();
 });
-document.addEventListener('mouseup', () => { mouseDown = false; S.steer = 0; S.fire = false; if (S.mode === 'drive') sendInput(); });
+document.addEventListener('mouseup', () => { mouseDown = false; touches.delete('m'); readTouches(); if (S.mode === 'drive') sendInput(); });
+// teclado (teste no desktop): setas e espaco
+const keys = new Set();
+document.addEventListener('keydown', (e) => {
+  if (S.mode !== 'drive' || e.repeat) return;
+  if (e.key === 'ArrowLeft') touches.set('kL', 'L');
+  else if (e.key === 'ArrowRight') touches.set('kR', 'R');
+  else if (e.key === ' ') touches.set('kA', 'A');
+  else return;
+  keys.add(e.key); readTouches(); sendInput();
+});
+document.addEventListener('keyup', (e) => {
+  touches.delete(e.key === 'ArrowLeft' ? 'kL' : e.key === 'ArrowRight' ? 'kR' : e.key === ' ' ? 'kA' : '');
+  readTouches(); if (S.mode === 'drive') sendInput();
+});
 
 // botoes de menu (Master)
 $('menu').addEventListener('click', (e) => {
@@ -192,7 +228,7 @@ $('code').value = urlRoom || saved || '';
 if (urlRoom.length === 4 || (saved && saved.length === 4)) join();
 
 // heartbeat de entrada + ping
-setInterval(() => { if (S.joined && S.mode === 'drive') sendInput(); }, 33);
+setInterval(() => { steerTick(); if (S.joined && S.mode === 'drive') sendInput(); }, 33);
 setInterval(() => { if (S.joined && S.mode !== 'drive') sendInput(); }, 500);
 setInterval(() => send({ t: 'ping', ts: performance.now() }), 2000);
 document.addEventListener('visibilitychange', () => sendInput());
