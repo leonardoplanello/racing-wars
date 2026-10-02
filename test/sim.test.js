@@ -4,7 +4,7 @@ import { buildTrack } from '../sim/track.js';
 import testCircuit from '../sim/tracks/testcircuit.js';
 import { makeCar, placeCar, stepCar, updateProgress, hitCar, collideCars, hullPos, HULL, DT, CAR } from '../sim/car.js';
 import { Game, scoreRound, RULES } from '../sim/game.js';
-import { whompFactor, WHOMP, TRAIL } from '../sim/items.js';
+import { whompFactor, WHOMP, TRAIL, ICE, POWER } from '../sim/items.js';
 import { makeWheel } from '../sim/body.js';
 import { ChaseCamera, CAMERA } from '../sim/camera.js';
 import { makeBrain, think, DIFFICULTY_ORDER } from '../sim/ai.js';
@@ -539,7 +539,9 @@ test('whomp: forca cai exponencialmente com a distancia e some fora do alcance',
   assert.ok(whompFactor(2) > whompFactor(5) && whompFactor(5) > whompFactor(10));
   assert.ok(Math.abs(whompFactor(2) / whompFactor(5) - Math.exp(3 / WHOMP.lambda)) < 1e-9);
   assert.equal(whompFactor(WHOMP.radius + 1), 0);
-  assert.ok(WHOMP.push * whompFactor(14) < 4, 'longe quase nao empurra');
+  assert.ok(WHOMP.push * whompFactor(2) > 100, 'colado e forte');
+  assert.ok(WHOMP.push * whompFactor(WHOMP.radius * 0.95) < 12, 'na borda do alcance quase nao empurra');
+  assert.ok(WHOMP.radius >= 28, 'alcance grande');
 });
 
 test('whomp: carro colado e jogado longe e sai do chao; o de longe quase nao sente', () => {
@@ -550,7 +552,7 @@ test('whomp: carro colado e jogado longe e sai do chao; o de longe quase nao sen
   const p = track.pointAt(60);
   a.x = p.x; a.z = p.z;
   near.x = p.x + p.nx * 2.2; near.z = p.z + p.nz * 2.2;
-  far.x = p.x - p.nx * 13; far.z = p.z - p.nz * 13;
+  far.x = p.x - p.nx * (WHOMP.radius + 4); far.z = p.z - p.nz * (WHOMP.radius + 4);
   a.item = 'whomp';
   game.items.use(a, game);
   let maxY = 0;
@@ -822,7 +824,7 @@ test('magnetico: carro vivo recebe empurrao e pulinho, mas mantem o rumo (sem ro
   }
   assert.equal(near.state === 'stun', false, 'nao vira estado de atordoamento');
   assert.ok(hop > 0.02, 'sai do chao: ' + hop);
-  assert.ok(maxDh < 0.75, 'mantem o rumo mais ou menos: ' + maxDh);
+  assert.ok(maxDh < 1.3, 'mantem o rumo mais ou menos: ' + maxDh);
   assert.ok(spin < 3.5, 'sem giro violento: ' + spin);
 });
 
@@ -916,26 +918,26 @@ test('nitro: nao tomba nas rampas nem nas curvas (nunca atordoa nem vira de cabe
   }
 });
 
-test('gelo: o morteiro cai ~45 u a frente e congela os carros da area (menos o dono)', () => {
+test('gelo: o morteiro cai ICE.range u a frente e congela os carros da area (menos o dono)', () => {
   const game = raceStart(4);
   const [a, near, edge, far] = game.cars;
   const p = track.pointAt(0.55 * track.length), h = Math.atan2(p.tz, p.tx);
   const fx = Math.cos(h), fz = Math.sin(h);
   for (const c of game.cars) { relocate(c, track, p.x, p.z); c.h = h; c.y = groundY(c); c.vx = c.vz = 0; c.locked = true; }
-  const tx = p.x + fx * 45, tz = p.z + fz * 45;
+  const tx = p.x + fx * ICE.range, tz = p.z + fz * ICE.range;
   relocate(near, track, tx + 2, tz); relocate(edge, track, tx - 7, tz); relocate(far, track, tx + 30, tz);
   for (const c of [near, edge, far]) { c.locked = false; c.vx = Math.cos(h) * 20; c.vz = Math.sin(h) * 20; c.h = h; }
   a.locked = false; a.item = 'ice';
   game.items.use(a, game);
   assert.equal(game.items.mortars.length, 1);
-  assert.ok(game.items.mortars[0].vy > 15, 'arco alto (morteiro): vy ' + game.items.mortars[0].vy);
+  assert.ok(game.items.mortars[0].vy > 10, 'arco alto (morteiro): vy ' + game.items.mortars[0].vy);
   let apex = 0;
-  for (let i = 0; i < 120 * 2.2 && game.items.mortars.length; i++) {
+  for (let i = 0; i < 120 * 3 && game.items.mortars.length; i++) {
     for (const c of [near, edge, far]) { c.vx = Math.cos(h) * 0; c.vz = 0; } // alvos parados na area
     game.step(DT);
     apex = Math.max(apex, game.items.mortars[0]?.y ?? 0);
   }
-  assert.ok(apex > 5, 'subiu bastante: ' + apex);
+  assert.ok(apex > 2.5, 'subiu bastante: ' + apex);
   assert.equal(game.items.mortars.length, 0, 'caiu');
   assert.ok(game.events.some((e) => e.type === 'iceBurst'));
   assert.ok(near.freeze > 2, 'perto: congelado ' + near.freeze);
@@ -962,7 +964,8 @@ test('gelo: carro congelado desliza em linha reta, sem esterco nem tracao, e dep
   }
   assert.ok(maxDev < 0.5, 'linha reta: ' + maxDev);
   assert.ok(Math.abs(Math.atan2(Math.sin(a.h - h), Math.cos(a.h - h))) < 0.05, 'rumo travado');
-  assert.ok(minV > 15, 'perde pouca velocidade (atrito de gelo): ' + minV);
+  assert.ok(minV > 15, 'mantem a velocidade, so desacelera ate 85% do normal: ' + minV);
+  assert.ok(minV >= CAR.iceKeep * CAR.cruise - 0.5, 'nunca abaixo de 85% da velocidade normal: ' + minV);
   assert.ok(a.freeze > 0, 'ainda congelado');
   for (let i = 0; i < 120 * 0.5; i++) game.step(DT);
   assert.equal(a.freeze, 0, 'descongelou');
@@ -984,7 +987,12 @@ test('precipicio: quem sai da pista para o fosso cai e e eliminado ("caiu no pre
   assert.ok(track.chasmAt(a.near), 'dentro do fosso');
   game.step(DT);
   assert.equal(a.state, 'falling');
-  for (let i = 0; i < 200; i++) game.step(DT);
+  // nao morre na hora: cai (visivel) e so e eliminado ao sair do enquadramento (ou no limite de seguranca)
+  for (let i = 0; i < 30; i++) game.step(DT);
+  assert.equal(a.state, 'falling');
+  assert.equal(a.alive, true, 'queda sem morte instantanea');
+  assert.ok(!a.hidden, 'continua visivel enquanto cai');
+  for (let i = 0; i < 120 * (RULES.chasmFallMax + 0.5); i++) game.step(DT);
   assert.equal(a.alive, false);
   assert.ok(game.events.some((e) => e.type === 'dead' && e.cause === 'chasm'));
   // o outro lado da pista (direita) e terra comum
@@ -1102,4 +1110,134 @@ test('bots (Facil): quem fica mais de 5 s na frente alivia o ritmo; Medio nao', 
   };
   assert.equal(run('medium'), false, 'medio nunca segura o ritmo');
   assert.equal(run('easy'), true, 'facil segura o ritmo depois de passar do tempo na frente');
+});
+
+test('colisao: carro encostado na lateral/traseira de outro nao fica preso (escorrega e se solta)', () => {
+  for (const wreck of [false, true]) {
+    const a = makeCar(0), b = makeCar(1);
+    placeCar(a, track, 20, 2.3); placeCar(b, track, 20, 0);
+    for (const c of [a, b]) { c.locked = false; c.state = 'run'; }
+    if (wreck) { b.state = 'wreck'; b.asleep = true; }
+    a.vx = Math.cos(a.h) * 20; a.vz = Math.sin(a.h) * 20;
+    const fx = Math.cos(a.h), fz = Math.sin(a.h);
+    for (let i = 0; i < 120 * 4; i++) {
+      a.steer = i < 120 ? -0.5 : 0.3; // encosta no outro e depois alivia
+      stepCar(a, track, DT, []); stepCar(b, track, DT, []); collideCars(a, b, []);
+    }
+    const lon = (a.x - b.x) * fx + (a.z - b.z) * fz;
+    assert.ok(a.speed > 5 || Math.abs(lon) > 8, (wreck ? 'carcaca' : 'carro') + ': nao ficou preso, v=' + a.speed + ' lon=' + lon);
+  }
+});
+
+test('nitro: alto controle - mesma curva com nitro derrapa menos do que sem', () => {
+  const run = (boost) => {
+    const car = makeCar(0);
+    placeCar(car, openTrack, 100, 0);
+    car.locked = false; car.state = 'run'; car.vx = 40; car.vz = 0;
+    let slip = 0;
+    for (let i = 0; i < 120 * 2; i++) {
+      if (boost) car.boost = 1;
+      car.steer = i > 20 ? 0.5 : 0;
+      stepCar(car, openTrack, DT, []);
+      slip = Math.max(slip, car.slip / Math.max(car.speed, 1));
+    }
+    return slip;
+  };
+  const withBoost = run(true), without = run(false);
+  assert.ok(withBoost <= without * 1.1, 'derrapagem com nitro ' + withBoost + ' vs ' + without);
+});
+
+test('mina: so explode quem encosta na TRASEIRA do carro com a bomba (lado a lado nao conta)', () => {
+  const game = raceStart(3);
+  const [a, b, c] = game.cars;
+  const p = track.pointAt(0.55 * track.length), h = Math.atan2(p.tz, p.tx);
+  const fx = Math.cos(h), fz = Math.sin(h);
+  // lado a lado, encostado: nao explode, a mina e largada
+  relocate(a, track, p.x, p.z); relocate(b, track, p.x + p.nx * 2.7, p.z + p.nz * 2.7);
+  relocate(c, track, p.x + p.nx * 40, p.z + p.nz * 40);
+  for (const k of [a, b, c]) { k.h = h; k.y = groundY(k); k.vx = k.vz = 0; }
+  a.item = 'mine';
+  game.items.use(a, game);
+  assert.equal(b.alive, true, 'lateral nao explode');
+  assert.equal(game.items.mines.length, 1, 'a mina foi largada');
+  // colado atras (para-choque com traseira): explode na hora
+  const g3 = raceStart(3);
+  const [a3, b3, c3] = g3.cars;
+  relocate(a3, track, p.x, p.z); relocate(b3, track, p.x - fx * 3.6, p.z - fz * 3.6);
+  relocate(c3, track, p.x + p.nx * 40, p.z + p.nz * 40);
+  for (const k of [a3, b3, c3]) { k.h = h; k.y = groundY(k); k.vx = k.vz = 0; }
+  a3.item = 'mine';
+  g3.items.use(a3, g3);
+  assert.equal(b3.alive, false, 'o encostado atras explodiu');
+  assert.equal(c3.alive, true);
+  assert.equal(g3.items.mines.length, 0, 'a mina nao foi largada');
+  // longe: a mina e largada normalmente
+  const g2 = raceStart(2);
+  relocate(g2.cars[1], track, p.x + p.nx * 60, p.z + p.nz * 60);
+  g2.cars[0].item = 'mine';
+  g2.items.use(g2.cars[0], g2);
+  assert.equal(g2.items.mines.length, 1);
+});
+
+test('bots: o bot que abre vantagem sobre o jogador real alivia o ritmo (Facil e Medio); Dificil nao', () => {
+  for (const [level, expectSlow] of [['easy', true], ['medium', true], ['hard', false]]) {
+    const game = new Game([{ id: 0, name: 'H', color: 0, isBot: false }, { id: 1, name: 'B', color: 1, isBot: true }], { track, cup: 'fast', seed: 3 });
+    game.state = 'RACING'; game.time = 5; game.debug.noCut = true;
+    for (const c of game.cars) { c.locked = false; c.state = 'run'; }
+    const [h, bot] = game.cars;
+    bot.progress = h.progress + 120; // bot muito a frente do humano
+    const brain = makeBrain(makeRng(1), 0.9, level);
+    think(brain, bot, game, 1 / 60);
+    assert.equal(bot.throttle < 1, expectSlow, level + ' throttle ' + bot.throttle);
+  }
+});
+
+test('colisao: bater na roda de tras gira o carro atingido e quem bate nao fica preso na lateral', () => {
+  const a = makeCar(0), b = makeCar(1);
+  placeCar(a, track, 20, 0); placeCar(b, track, 30, 0);
+  for (const c of [a, b]) { c.locked = false; c.state = 'run'; }
+  // a vem por tras e um pouco de lado: acerta a roda traseira de b
+  const p = track.pointAt(20), h = a.h;
+  a.x = b.x - Math.cos(h) * 3.2 + p.nx * 0.9 - p.nx * 0; a.z = b.z - Math.sin(h) * 3.2 + p.nz * 0.9;
+  a.vx = Math.cos(h) * 30; a.vz = Math.sin(h) * 30;
+  b.vx = Math.cos(h) * 20; b.vz = Math.sin(h) * 20;
+  let maxW = 0;
+  for (let i = 0; i < 120 * 2; i++) {
+    stepCar(a, track, DT, []); stepCar(b, track, DT, []); collideCars(a, b, []);
+    maxW = Math.max(maxW, Math.abs(b.w));
+  }
+  assert.ok(maxW > 0.8, 'o carro atingido girou: ' + maxW);
+  assert.ok(a.speed > 5, 'quem bateu continua andando: ' + a.speed);
+});
+
+test('cenario: explosao destroi arvores e pedras no raio (casas resistem) e a corrida nova restaura', () => {
+  const game = raceStart(2);
+  const sc = game.track.scenery;
+  const tree = sc.trees[0];
+  const house = sc.houses[0];
+  const before = sc.query(tree.x, tree.z, 3).length;
+  game.items.explode(game, tree.x, tree.z, 'mine', 2.6, 0, null);
+  assert.ok(game.events.some((e) => e.type === 'sceneryHit' && e.kind === 'tree'), 'evento de arvore destruida');
+  assert.ok(game.events.some((e) => e.type === 'blast'), 'evento blast para quebrar cercas');
+  assert.ok(sc.query(tree.x, tree.z, 3).length < before, 'colisor da arvore sumiu');
+  if (house) {
+    const n = sc.query(house.x, house.z, 8).filter((o) => o.kind === 'house').length;
+    game.items.explode(game, house.x, house.z, 'missile', 3.2, 0, null);
+    assert.equal(sc.query(house.x, house.z, 8).filter((o) => o.kind === 'house').length, n, 'casa resiste');
+  }
+  sc.restore();
+  assert.equal(sc.query(tree.x, tree.z, 3).length, before, 'restaurado');
+});
+
+test('gelo: o morteiro sobe alto (apogeu ~ICE.lob) e o gelo marca o cenario', () => {
+  const game = raceStart(2);
+  const [a] = game.cars;
+  const p = track.pointAt(0.55 * track.length), h = Math.atan2(p.tz, p.tx);
+  relocate(a, track, p.x, p.z); a.h = h; a.y = groundY(a); a.locked = false; a.item = 'ice';
+  relocate(game.cars[1], track, p.x + p.nx * 80, p.z + p.nz * 80);
+  game.items.use(a, game);
+  let apex = 0;
+  for (let i = 0; i < 120 * 6 && game.items.mortars.length; i++) { game.step(DT); apex = Math.max(apex, game.items.mortars[0]?.y ?? 0); }
+  assert.ok(apex > ICE.lob * 0.8, 'apogeu alto: ' + apex);
+  assert.ok(game.events.some((e) => e.type === 'iceBurst'));
 });

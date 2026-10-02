@@ -11,6 +11,7 @@ const RIVER_HALF = 34; // meia-largura do rio em volta da ponte
 const WATER_Y = -1.1;
 const BK_CELL = 10;
 const ZERO = new THREE.Matrix4().makeScale(0, 0, 0);
+const ICE_TINT = new THREE.Color(0x9fdcff);
 
 const m4 = new THREE.Matrix4(), qt = new THREE.Quaternion(), eu = new THREE.Euler(), ps = new THREE.Vector3(), sc = new THREE.Vector3();
 
@@ -41,11 +42,19 @@ function colored(geo, hex) {
   return g;
 }
 
-export function buildWorld(track, quality = 'high') {
+/**
+ * opts.fast: reconstrucao rapida para o editor (so pista, cercas, portico): nao gera o cenario decorativo
+ * (arvores, casas, montanhas...). O decor fica num grupo `userData.decor` que o editor reaproveita.
+ */
+export function buildWorld(track, quality = 'high', opts = {}) {
+  const fast = !!opts.fast;
   const low = quality === 'low';
   const group = new THREE.Group();
+  const decor = new THREE.Group();
+  decor.userData.decor = true;
+  if (!fast) group.add(decor);
   const rng = makeRng(99);
-  if (!track.scenery) track.scenery = buildScenery(track);
+  if (!track.scenery && !fast) track.scenery = buildScenery(track);
   const breakables = []; // trechos de cerca que quebram quando um carro passa
   const meshes = {};
   const { N, X, Z, TX: TXs, TZ: TZs, NX, NZ, ELEV, BRIDGE, SURFACE } = track;
@@ -350,6 +359,12 @@ export function buildWorld(track, quality = 'high') {
     const posts = [], rails = [], diags = [];
     const lposts = [], lrails = [], pickets = [];
     const H = 6.2, seg = Math.round(6 / ds);
+    // sem cerca na beira do precipicio: nem no trecho, nem nos ~12 u antes/depois dele
+    const nearChasm = (k, sg) => {
+      const m = Math.ceil(12 / ds);
+      for (let q = -m; q <= m; q++) { const c = track.CH[(k + q + N) % N]; if (c === sg || c === 2) return true; }
+      return false;
+    };
     for (const r of runs) {
       const isBridge = !!BRIDGE[r.a];
       for (const sg of [-1, 1]) {
@@ -369,7 +384,7 @@ export function buildWorld(track, quality = 'high') {
             const dl = Math.hypot(len, H - 0.5);
             diags.push(matrix((x0 + x1) / 2, y0 + H / 2 + 0.25, (z0 + z1) / 2, yaw, dl, 0.5, 0.5, flip * Math.atan2(H - 0.5, len)));
             flip = -flip;
-          } else if (track.RAILS[k0] && !(track.CH[k0] === sg || track.CH[k0] === 2)) {
+          } else if (track.RAILS[k0] && !nearChasm(k0, sg)) {
             const bk = { x: (x0 + x1) / 2, z: (z0 + z1) / 2, y: y0, kind: 'iron', broken: false, parts: [['lposts', lposts.length], ['lrails', lrails.length], ['lrails', lrails.length + 1]] };
             lposts.push(matrix(x0, y0 + 1.8, z0, yaw, 0.38, 3.6, 0.38));
             lrails.push(matrix((x0 + x1) / 2, y0 + 3.0, (z0 + z1) / 2, yaw, len, 0.16, 0.16));
@@ -438,8 +453,9 @@ export function buildWorld(track, quality = 'high') {
   }
 
   // ------------------------------------------------------------ cenario
-  addScenery(group, track, { rng, low, bridgeRuns, W, edge, breakables, meshes });
+  addScenery(group, track, { rng, low, bridgeRuns, W, edge, breakables, meshes, fast, decor });
 
+  if (!fast) {
   // montanhas rochosas laranja ao fundo
   {
     let cx = 0, cz = 0;
@@ -461,7 +477,7 @@ export function buildWorld(track, quality = 'high') {
       g.computeVertexNormals();
       return colored(g, [0xc98a3c, 0xb8742f, 0xd89b4a][i % 3]);
     }));
-    group.add(new THREE.Mesh(mg, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1, flatShading: true })));
+    decor.add(new THREE.Mesh(mg, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1, flatShading: true })));
     void mats;
   }
 
@@ -473,8 +489,9 @@ export function buildWorld(track, quality = 'high') {
       const a = rng() * Math.PI * 2, r = 380 + rng() * 240;
       s.position.set(Math.cos(a) * r, 130 + rng() * 70, Math.sin(a) * r);
       s.scale.set(180 + rng() * 140, 80 + rng() * 40, 1);
-      group.add(s);
+      decor.add(s);
     }
+  }
   }
 
   const bkGrid = new Map();
@@ -487,6 +504,53 @@ export function buildWorld(track, quality = 'high') {
   return {
     group,
     gantry,
+    /** Poder (explosao, whomp, missil, gelo) quebra todas as cercas no raio. Retorna os trechos quebrados. */
+    breakFencesIn(x, z, r) {
+      const broke = [];
+      const n = Math.ceil(r / BK_CELL) + 1, cx = Math.floor(x / BK_CELL), cz = Math.floor(z / BK_CELL);
+      for (let a = -n; a <= n; a++) for (let b = -n; b <= n; b++) {
+        const list = bkGrid.get((cx + a) * 100003 + (cz + b));
+        if (!list) continue;
+        for (const bk of list) {
+          const d = Math.hypot(bk.x - x, bk.z - z);
+          if (bk.broken || d > r) continue;
+          bk.broken = true;
+          for (const [tag, idx] of bk.parts) {
+            const mesh = meshes[tag];
+            if (mesh) { mesh.setMatrixAt(idx, ZERO); mesh.instanceMatrix.needsUpdate = true; }
+          }
+          broke.push({ x: bk.x, z: bk.z, y: bk.y, kind: bk.kind, dx: d > 0.1 ? (bk.x - x) / d : 1, dz: d > 0.1 ? (bk.z - z) / d : 0, speed: 14 });
+        }
+      }
+      return broke;
+    },
+    /** Arvore/pedra destruida por um poder: some do cenario. */
+    hideScenery(kind, idx) {
+      const s = meshes.scn;
+      if (!s) return;
+      if (kind === 'tree') { s.crown.setMatrixAt(idx, ZERO); s.trunk.setMatrixAt(idx, ZERO); s.crown.instanceMatrix.needsUpdate = s.trunk.instanceMatrix.needsUpdate = true; }
+      else if (kind === 'rock' && s.rockMesh) { s.rockMesh.setMatrixAt(idx, ZERO); s.rockMesh.instanceMatrix.needsUpdate = true; }
+    },
+    /** Gelo: arvore/pedra ficam azuladas. */
+    freezeScenery(kind, idx) {
+      const s = meshes.scn;
+      const m = kind === 'tree' ? s?.crown : kind === 'rock' ? s?.rockMesh : null;
+      if (!m) return;
+      m.setColorAt(idx, ICE_TINT);
+      if (m.instanceColor) m.instanceColor.needsUpdate = true;
+    },
+    /** Nova rodada: tudo volta ao lugar (arvores, pedras, cores). Cercas quebradas continuam quebradas. */
+    restoreScenery() {
+      const s = meshes.scn;
+      if (!s) return;
+      s.tree.forEach((o, i) => { s.crown.setMatrixAt(i, o.m); s.trunk.setMatrixAt(i, o.m); s.crown.setColorAt(i, o.c); });
+      s.rock.forEach((o, i) => { s.rockMesh.setMatrixAt(i, o.m); s.rockMesh.setColorAt(i, o.c); });
+      for (const m of [s.crown, s.trunk, s.rockMesh]) {
+        if (!m) continue;
+        m.instanceMatrix.needsUpdate = true;
+        if (m.instanceColor) m.instanceColor.needsUpdate = true;
+      }
+    },
     /** Anima a agua e quebra cercas atravessadas por carros. Retorna os trechos quebrados ({x,z,y,kind,dx,dz,speed}). */
     update(t, cars = []) {
       waterTex.offset.set(t * 0.015, t * 0.01);
@@ -515,7 +579,7 @@ export function buildWorld(track, quality = 'high') {
 }
 
 // ---------------------------------------------------------------- decoracao
-function addScenery(group, track, { rng, low, bridgeRuns, W, edge, breakables, meshes }) {
+function addScenery(group, track, { rng, low, bridgeRuns, W, edge, breakables, meshes, fast, decor }) {
   const sc0 = track.scenery;
   const { N, X, Z, NX, NZ, ELEV, BRIDGE } = track;
   // hash espacial das amostras da pista para medir distancia
@@ -559,6 +623,7 @@ function addScenery(group, track, { rng, low, bridgeRuns, W, edge, breakables, m
   const f = low ? 0.4 : 1;
   const tint = new THREE.Color();
 
+  if (!fast) {
   // arvores redondas (copa dupla + tronco) e pinheiros
   const trunkG = colored(new THREE.CylinderGeometry(0.85, 1.25, 6, 7).translate(0, 3, 0), 0x7a4e2b);
   const crownG = mergeGeometries([
@@ -571,14 +636,16 @@ function addScenery(group, track, { rng, low, bridgeRuns, W, edge, breakables, m
   const crown = new THREE.InstancedMesh(crownG, new THREE.MeshStandardMaterial({ roughness: 0.85, flatShading: true }), trees.length);
   const trunk = new THREE.InstancedMesh(trunkG, treeM, trees.length);
   crown.castShadow = trunk.castShadow = true;
+  const scn = (meshes.scn = { tree: [], rock: [], crown, trunk });
   trees.forEach((t, i) => {
     const m = matrix(t.x, 0, t.z, t.yaw, t.s, t.sy, t.s);
     crown.setMatrixAt(i, m);
     trunk.setMatrixAt(i, m);
     tint.setHSL(0.26 + t.hue * 0.07, 0.62, 0.34 + t.light * 0.14);
     crown.setColorAt(i, tint);
+    scn.tree.push({ m: m.clone(), c: tint.clone() });
   });
-  group.add(crown, trunk);
+  decor.add(crown, trunk);
 
   // palmeiras
   {
@@ -592,7 +659,7 @@ function addScenery(group, track, { rng, low, bridgeRuns, W, edge, breakables, m
     const pm = new THREE.InstancedMesh(palmG, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.8, flatShading: true, side: THREE.DoubleSide }), palms.length);
     pm.castShadow = true;
     palms.forEach(([x, z], i) => pm.setMatrixAt(i, matrix(x, 0, z, rng() * 6.28, 1 + rng() * 0.5, 1 + rng() * 0.5, 1 + rng() * 0.5)));
-    group.add(pm);
+    decor.add(pm);
   }
 
   // arbustos e pedras
@@ -607,16 +674,19 @@ function addScenery(group, track, { rng, low, bridgeRuns, W, edge, breakables, m
       bush.setColorAt(i, tint);
     });
     bush.castShadow = true;
-    group.add(bush);
+    decor.add(bush);
     const rocks = sc0.rocks;
     const rk = new THREE.InstancedMesh(new THREE.DodecahedronGeometry(1.6, 0), new THREE.MeshStandardMaterial({ roughness: 0.95, flatShading: true }), rocks.length);
+    scn.rockMesh = rk;
     rocks.forEach((r, i) => {
-      rk.setMatrixAt(i, matrix(r.x, 0.2, r.z, r.yaw, r.s * 1.3, r.s * 0.8, r.s));
+      const m = matrix(r.x, 0.2, r.z, r.yaw, r.s * 1.3, r.s * 0.8, r.s);
+      rk.setMatrixAt(i, m);
       tint.setHSL(0.08, 0.05, 0.4 + r.tone * 0.2);
       rk.setColorAt(i, tint);
+      scn.rock.push({ m: m.clone(), c: tint.clone() });
     });
     rk.castShadow = true;
-    group.add(rk);
+    decor.add(rk);
   }
 
   // tufos de grama (planos cruzados com alfa)
@@ -644,7 +714,8 @@ function addScenery(group, track, { rng, low, bridgeRuns, W, edge, breakables, m
       tint.setHSL(0.27 + rng() * 0.08, 0.55, 0.62 + rng() * 0.3);
       im.setColorAt(i, tint);
     });
-    group.add(im);
+    decor.add(im);
+  }
   }
 
   // cercas brancas dos dois lados (so em terra)
@@ -655,6 +726,7 @@ function addScenery(group, track, { rng, low, bridgeRuns, W, edge, breakables, m
       for (let i = 0; i < N; i += step) {
         const j = (i + step) % N;
         if (BRIDGE[i] || BRIDGE[j] || ELEV[i] > 0.05 || dist(X[i] + NX[i] * sg * (edge + 6), Z[i] + NZ[i] * sg * (edge + 6), true) < W + 5) continue;
+        if (track.hasChasm && [6, 14, 24].some((q) => track.chasmContains(X[i] + NX[i] * sg * (edge + q), Z[i] + NZ[i] * sg * (edge + q)))) continue;
         const o = (edge + 6) * sg;
         const x0 = X[i] + NX[i] * o, z0 = Z[i] + NZ[i] * o, x1 = X[j] + NX[j] * o, z1 = Z[j] + NZ[j] * o;
         const yaw = Math.atan2(z1 - z0, x1 - x0), len = Math.hypot(x1 - x0, z1 - z0);
@@ -673,7 +745,7 @@ function addScenery(group, track, { rng, low, bridgeRuns, W, edge, breakables, m
   }
 
   // casinhas (tijolo ou parede branca), com janela
-  {
+  if (!fast) {
     const houses = sc0.houses;
     const bodyG = new THREE.BoxGeometry(11, 7, 9).translate(0, 3.5, 0);
     const roofG = new THREE.ConeGeometry(9, 5, 4).rotateY(Math.PI / 4).translate(0, 9.5, 0);
@@ -702,6 +774,6 @@ function addScenery(group, track, { rng, low, bridgeRuns, W, edge, breakables, m
     });
     brick.count = bi; white.count = wi; roofs.count = wn; wins.count = wn * 2;
     for (const im of [brick, white, roofs]) im.castShadow = true;
-    group.add(brick, white, roofs, wins);
+    decor.add(brick, white, roofs, wins);
   }
 }

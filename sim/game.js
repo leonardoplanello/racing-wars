@@ -19,6 +19,7 @@ export const RULES = {
   laps: 3,
   countdown: 3,
   cutGrace: 1.0, // segundos apos o GO sem corte de camera
+  chasmFallMax: 3, // queda no precipicio: elimina ao sair do quadro ou, no maximo, apos esse tempo (s)
   zoomIn: 0.3, // zoom rapido no sobrevivente
   hold: 0.5, // tempo mostrando o sobrevivente
   gridRowGap: 7.5,
@@ -102,6 +103,7 @@ export class Game {
       placeCar(car, this.track, frontProgress - slot.back, slot.side * this.track.halfWidth * 0.36);
     });
     this.items.reset();
+    if (this.track.scenery?.restore) { this.track.scenery.restore(); this.events.push({ type: 'sceneryReset' }); }
     this.wheels.length = 0;
     this.deaths = [];
     this.survivorId = -1;
@@ -114,7 +116,7 @@ export class Game {
   }
 
   frameCamera(snap = false) {
-    const alive = this.aliveCars();
+    const alive = this.aliveCars().filter((c) => c.state !== 'falling'); // quem despenca nao puxa a camera
     this.camera.fast = 1;
     this.camera.computeTarget(alive.length ? alive : this.cars, this.track);
     if (snap) this.camera.snap();
@@ -125,7 +127,7 @@ export class Game {
   }
   leaderId() {
     let best = null;
-    for (const c of this.cars) if (c.alive && (!best || c.progress > best.progress)) best = c;
+    for (const c of this.cars) if (c.alive && c.state !== 'falling' && (!best || c.progress > best.progress)) best = c;
     return best ? best.id : -1;
   }
 
@@ -343,7 +345,8 @@ export class Game {
         if (this.track.inWater(c.near)) startFall(c, this.events, 'fall');
         else if (this.track.hasChasm && this.track.chasmAt(c.near)) startFall(c, this.events, 'chasm');
       }
-      if (c.alive && c.state === 'falling') this.kill(c, c.fallCause === 'chasm' ? 'chasm' : 'fall');
+      // agua: some ao fim da animacao; precipicio: despenca ate sair do enquadramento (corte da camera), com limite de seguranca
+      if (c.alive && c.state === 'falling' && (c.fallCause !== 'chasm' || c.fall > RULES.chasmFallMax)) this.kill(c, c.fallCause === 'chasm' ? 'chasm' : 'fall');
     }
     const live = this.cars.filter((c) => c.alive || c.state === 'wreck');
     for (let i = 0; i < live.length; i++) {
@@ -356,7 +359,9 @@ export class Game {
     if (this.time > RULES.cutGrace && !this.debug.noCut) {
       const lead = this.leaderId(); // o lider nunca e cortado
       for (const c of this.cars) {
-        if (c.alive && c.id !== lead && this.camera.isCut(c.x, c.z, c.y)) this.explodeCar(c, 'cut');
+        if (!c.alive || !this.camera.isCut(c.x, c.z, c.y)) continue;
+        if (c.state === 'falling') this.kill(c, 'chasm'); // despencou e saiu do quadro
+        else if (c.id !== lead) this.explodeCar(c, 'cut');
       }
     }
 

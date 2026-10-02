@@ -1,19 +1,20 @@
 // Caixas de item, minas, misseis e ondas Whomp.
 import { ITEMS } from '../shared/protocol.js';
-import { CAR, impulseCar } from './car.js';
+import { CAR, HULL, hullPos, impulseCar } from './car.js';
 
-const BOX_RADIUS = 2.3;
-const BOX_RESPAWN = 6;
-const MINE_TRIGGER = 2.3;
+// parametros gerais dos poderes (editaveis no F4). speedScale multiplica a velocidade de missil, onda whomp e morteiro
+export const POWER = { boxRadius: 2.3, boxRespawn: 6, mineRadius: 1.0, mineTouch: 0.4, speedScale: 1 };
 export const MISSILE = { speed: 90, life: 4, hit: 1.6, blast: 3.2 };
 // rastro do nitro: segmentos de fogo que explodem quem passar (menos o dono)
 // curto e colado no carro: ~0,3 s de fogo (uns 15 u a 52 u/s)
 export const TRAIL = { gap: 0.8, life: 0.3, radius: 1.5, grace: 0.06, back: 1.5 };
 // Whomp: forca exponencial com a distancia (curto alcance): F = push * exp(-d / lambda)
-export const WHOMP = { radius: 16, speed: 40, push: 110, lambda: 3.5, lift: 11, liveFrac: 0.6, maxSpin: 1.6 };
+export const WHOMP = { radius: 30, speed: 55, push: 160, lambda: 8, lift: 14, liveFrac: 0.5, maxSpin: 1.8, sceneryRadius: 18 };
 
-// canhao de gelo: morteiro (arco alto) que cai a distancia fixa e congela os carros da area
-export const ICE = { range: 45, flight: 1.6, radius: 9, time: 3, gravity: 26 };
+// canhao de gelo: morteiro (arco bem alto, tipo morteiro) que cai a distancia fixa e congela os carros da area.
+// lob = altura do apogeu (u) acima do ponto mais alto; flight = tempo minimo de voo (s). A velocidade do carro
+// congelado esta em CAR.iceKeep / CAR.iceDecel
+export const ICE = { range: 45, flight: 0.02, radius: 13, time: 4, gravity: 200, lob: 14 };
 
 export const CUP_BOX_DENSITY = { fast: 0, super: 1, war: 2 };
 
@@ -21,6 +22,50 @@ export const CUP_BOX_DENSITY = { fast: 0, super: 1, war: 2 };
 export function whompFactor(d) {
   return d > WHOMP.radius ? 0 : Math.exp(-d / WHOMP.lambda);
 }
+
+/** Menor distancia da borda de um circulo do casco do carro ate o ponto (x,z). */
+export function hullDist(car, x, z) {
+  let best = Infinity;
+  for (let i = 0; i < HULL.length; i++) {
+    const p = hullPos(car, i, HP);
+    const d = Math.hypot(p.x - x, p.z - z) - CAR.circleR;
+    if (d < best) best = d;
+  }
+  return best;
+}
+const HP = { x: 0, z: 0 };
+
+/** Casco a casco: distancia minima entre as bordas dos circulos de dois carros. */
+export function hullGap(a, b) {
+  let best = Infinity;
+  for (let i = 0; i < HULL.length; i++) {
+    const p = hullPos(a, i, HP);
+    const d = hullDist(b, p.x, p.z) - CAR.circleR;
+    if (d < best) best = d;
+  }
+  return best;
+}
+
+/**
+ * Distancia entre os circulos TRASEIROS do carro a e os circulos de b que estao ATRAS dele (a bomba so pega
+ * quem encosta na traseira: lado a lado ou na frente nao conta).
+ */
+export function rearGap(a, b) {
+  const ca = Math.cos(a.h), sa = Math.sin(a.h);
+  let best = Infinity;
+  for (let k = 0; k < HULL.length; k++) {
+    const q = hullPos(b, k, HQ);
+    if ((q.x - a.x) * ca + (q.z - a.z) * sa > -1.6) continue; // so circulos de b atras da traseira de a
+    for (let i = 0; i < HULL.length; i++) {
+      if (!HULL[i].rear) continue;
+      const p = hullPos(a, i, HP);
+      const d = Math.hypot(p.x - q.x, p.z - q.z) - 2 * CAR.circleR;
+      if (d < best) best = d;
+    }
+  }
+  return best;
+}
+const HQ = { x: 0, z: 0 };
 
 export class Items {
   constructor(track, cup, rng) {
@@ -84,10 +129,10 @@ export class Items {
       for (const c of cars) {
         if (!c.alive || c.state === 'falling' || c.item) continue;
         const dx = c.x - b.x, dz = c.z - b.z;
-        if (dx * dx + dz * dz < BOX_RADIUS * BOX_RADIUS) {
+        if (dx * dx + dz * dz < POWER.boxRadius * POWER.boxRadius) {
           c.item = this.randomItem();
           b.active = false;
-          b.timer = BOX_RESPAWN;
+          b.timer = POWER.boxRespawn;
           events.push({ type: 'pickup', car: c.id, item: c.item, x: b.x, z: b.z });
           break;
         }
@@ -100,8 +145,7 @@ export class Items {
       for (const c of cars) {
         if (!c.alive || c.state === 'falling') continue;
         if (c.id === m.owner && m.age < 0.9) continue;
-        const dx = c.x - m.x, dz = c.z - m.z;
-        if (dx * dx + dz * dz < MINE_TRIGGER * MINE_TRIGGER) {
+        if (hullDist(c, m.x, m.z) < POWER.mineRadius) {
           this.explode(game, m.x, m.z, 'mine', 2.6, m.owner, c);
           this.mines.splice(i, 1);
           break;
@@ -123,8 +167,8 @@ export class Items {
           if (ahead > 0 && ahead < 36 && Math.abs(lat) < 3.2) { m.alarm = 0.26; events.push({ type: 'alarm', car: t.id }); break; }
         }
       }
-      m.x += Math.cos(m.h) * MISSILE.speed * dt;
-      m.z += Math.sin(m.h) * MISSILE.speed * dt;
+      m.x += Math.cos(m.h) * MISSILE.speed * POWER.speedScale * dt;
+      m.z += Math.sin(m.h) * MISSILE.speed * POWER.speedScale * dt;
       let boom = m.age > MISSILE.life;
       let hit = null;
       if (!boom) {
@@ -133,6 +177,14 @@ export class Items {
           if (c.id === m.owner && m.age < 0.5) continue;
           const dx = c.x - m.x, dz = c.z - m.z;
           if (dx * dx + dz * dz < (MISSILE.hit + CAR.radius) ** 2) { hit = c; boom = true; break; }
+        }
+      }
+      if (!boom && this.track.scenery) {
+        // o missil arrebenta em arvore/pedra/casa e quebra cercas no caminho
+        m.fx = (m.fx || 0) - dt;
+        if (m.fx <= 0) { m.fx = 0.05; events.push({ type: 'blast', x: m.x, z: m.z, radius: 2.2, kind: 'missileFly' }); }
+        for (const o of this.track.scenery.query(m.x, m.z, 4, this._sq || (this._sq = []))) {
+          if (Math.hypot(o.x - m.x, o.z - m.z) < o.r + 0.6) { boom = true; break; }
         }
       }
       if (!boom) {
@@ -147,12 +199,13 @@ export class Items {
     // morteiros de gelo: voo balistico; ao tocar o chao congelam quem estiver na area
     for (let i = this.mortars.length - 1; i >= 0; i--) {
       const m = this.mortars[i];
-      m.age += dt;
-      m.vy -= ICE.gravity * dt;
-      m.x += m.vx * dt; m.y += m.vy * dt; m.z += m.vz * dt;
+      const kd = dt * POWER.speedScale; // tempo do morteiro escala por inteiro: o arco e o alcance nao mudam
+      m.age += kd;
+      m.vy -= ICE.gravity * kd;
+      m.x += m.vx * kd; m.y += m.vy * kd; m.z += m.vz * kd;
       const gy = this.track.groundAt(m.x, m.z, m.hint, this._gp || (this._gp = { y: 0, nx: 0, ny: 1, nz: 0 })).y;
       if (this.track._gn) m.hint = this.track._gn.idx;
-      if (m.age > 0.25 && (m.y <= gy || m.age > ICE.flight + 1)) {
+      if (m.age > 0.25 && (m.y <= gy || m.age > m.T + 1)) {
         this.mortars.splice(i, 1);
         this.iceBurst(game, m.x, Math.max(gy, 0), m.z, m.owner);
       }
@@ -182,7 +235,9 @@ export class Items {
     // ondas whomp (magneticas)
     for (let i = this.shocks.length - 1; i >= 0; i--) {
       const s = this.shocks[i];
-      s.r += WHOMP.speed * dt;
+      s.r += WHOMP.speed * POWER.speedScale * dt;
+      // a onda derruba arvores/pedras e quebra cercas ate WHOMP.sceneryRadius
+      if (s.r <= WHOMP.sceneryRadius) this.blastWorld(game, s.x, s.z, s.r, 'whomp');
       for (const c of cars) {
         if (!(c.alive || c.state === 'wreck') || c.state === 'falling' || c.id === s.owner || s.hit.has(c.id)) continue;
         const dx = c.x - s.x, dz = c.z - s.z;
@@ -191,7 +246,7 @@ export class Items {
         s.hit.add(c.id);
         const e = whompFactor(d);
         const k = WHOMP.push * e;
-        if (k < 1.5) continue;
+        if (k < 0.8) continue;
         const nx = d > 0.01 ? dx / d : 1, nz = d > 0.01 ? dz / d : 0;
         if (c.state === 'run' || c.state === 'grid') {
           // carro vivo: empurrao e um pulinho, mantendo o rumo (so um leve giro, limitado)
@@ -214,9 +269,18 @@ export class Items {
     }
   }
 
+  /** Poder que acerta o mundo: destroi arvores/pedras no raio e avisa o render (cercas quebram, cenario some). */
+  blastWorld(game, x, z, radius, kind) {
+    game.events.push({ type: 'blast', x, z, radius, kind });
+    const sc = this.track.scenery;
+    if (!sc) return;
+    for (const h of sc.blast(x, z, radius)) game.events.push({ type: 'sceneryHit', kind: h.kind, idx: h.idx, x: h.x, z: h.z, h: h.h, from: kind });
+  }
+
   /** Explosao de mina/missil: o carro atingido (e vizinhos no raio) EXPLODE e vira carcaca. */
   explode(game, x, z, kind, power, owner, direct) {
     const radius = kind === 'missile' ? MISSILE.blast : 2.6;
+    this.blastWorld(game, x, z, radius + 0.5, kind);
     let any = false;
     for (const c of game.cars) {
       if (!c.alive || c.state === 'falling') continue;
@@ -231,6 +295,9 @@ export class Items {
   /** Impacto do gelo: congela (menos o dono) os carros no raio; mais perto, mais tempo. */
   iceBurst(game, x, y, z, owner) {
     game.events.push({ type: 'iceBurst', x, y, z, owner, radius: ICE.radius });
+    game.events.push({ type: 'blast', x, z, radius: ICE.radius, kind: 'ice' });
+    const sc = this.track.scenery;
+    if (sc) for (const h of sc.freeze(x, z, ICE.radius)) game.events.push({ type: 'sceneryFreeze', kind: h.kind, idx: h.idx, x: h.x, z: h.z });
     for (const c of game.cars) {
       if (!c.alive || c.state === 'falling' || c.id === owner) continue;
       const d = Math.hypot(c.x - x, c.z - z);
@@ -248,19 +315,30 @@ export class Items {
     if (item === 'nitro') {
       car.boost = 2;
     } else if (item === 'mine') {
-      this.mines.push({ x: car.x - fx * 3, z: car.z - fz * 3, owner: car.id, age: 0 });
+      // alguem encostado na TRASEIRA do carro com a bomba: ela explode nele na hora
+      let touched = false;
+      for (const o of game.cars) {
+        if (o === car || !o.alive || o.state === 'falling' || Math.abs(o.y - car.y) > 2) continue;
+        if (rearGap(car, o) < POWER.mineTouch) { this.explode(game, o.x, o.z, 'mine', 2.6, car.id, o); touched = true; }
+      }
+      if (!touched) this.mines.push({ x: car.x - fx * 3, z: car.z - fz * 3, owner: car.id, age: 0 });
     } else if (item === 'missile') {
       this.missiles.push({
         id: this.nextId++, x: car.x + fx * 2.6, z: car.z + fz * 2.6, h: car.h,
         owner: car.id, age: 0, alarm: 0, near: null,
       });
     } else if (item === 'ice') {
-      const sx = car.x + fx * 1.5, sz = car.z + fz * 1.5, sy = car.y + 1.8, T = ICE.flight;
+      // morteiro: sobe ate `lob` acima do ponto mais alto (saida ou alvo) e despenca no alvo; flight = tempo minimo
+      const sx = car.x + fx * 1.5, sz = car.z + fz * 1.5, sy = car.y + 1.8, g = ICE.gravity;
       const tx = car.x + fx * ICE.range, tz = car.z + fz * ICE.range;
       const ty = this.track.groundAt(tx, tz, -1, { y: 0, nx: 0, ny: 1, nz: 0 }).y;
+      const rise = Math.max(ICE.lob, 0.5) + Math.max(0, ty - sy);
+      let vy = Math.sqrt(2 * g * rise);
+      let T = vy / g + Math.sqrt(Math.max(0, 2 * (sy + rise - ty) / g));
+      if (T < ICE.flight) { T = ICE.flight; vy = (ty - sy + 0.5 * g * T * T) / T; }
       this.mortars.push({
         id: this.nextId++, x: sx, y: sy, z: sz, vx: (tx - sx) / T, vz: (tz - sz) / T,
-        vy: (ty - sy + 0.5 * ICE.gravity * T * T) / T, tx, ty, tz, owner: car.id, age: 0, hint: -1,
+        vy, T, tx, ty, tz, owner: car.id, age: 0, hint: -1,
       });
     } else if (item === 'whomp') {
       this.shocks.push({ x: car.x, z: car.z, r: 0, owner: car.id, hit: new Set() });

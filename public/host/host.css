@@ -45,6 +45,7 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #0b0e16; col
 #banner .big { font-size: min(22vw, 260px); font-weight: 900; color: #fff; text-shadow: 0 8px 0 #000a, 0 0 40px #000a; animation: pop .5s ease-out; }
 #banner .mid { font-size: min(7vw, 84px); font-weight: 900; text-shadow: 0 5px 0 #000a; animation: pop .4s ease-out; }
 #banner .sub { font-size: min(3vw, 30px); font-weight: 700; margin-top: 6px; text-shadow: 0 2px 0 #000; }
+@keyframes tlpop { from { transform: translateX(-50%) scale(1.7); opacity: 0; } to { transform: translateX(-50%) scale(1); opacity: 1; } }
 @keyframes pop { from { transform: scale(1.7); opacity: 0; } to { transform: scale(1); opacity: 1; } }
 
 /* telas */
@@ -55,6 +56,7 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #0b0e16; col
 .hint { color: #b9c3dc; font-size: 18px; }
 .hint b { color: #fff; }
 .btn { pointer-events: auto; cursor: pointer; border: 0; background: var(--accent); color: #221a00; font: 900 22px var(--font); padding: 12px 30px; border-radius: 14px; box-shadow: 0 6px 0 #a8870a; }
+.btn2 { display: inline-block; margin-top: 14px; text-decoration: none; background: #2b3a67; color: #fff; font-size: 17px; padding: 8px 22px; box-shadow: 0 5px 0 #151d3a; }
 .btn:active { transform: translateY(3px); box-shadow: 0 3px 0 #a8870a; }
 h2 { margin: 0; font-size: 34px; }
 .lobby { display: flex; gap: 40px; align-items: center; flex-wrap: wrap; justify-content: center; }
@@ -81,7 +83,7 @@ h2 { margin: 0; font-size: 34px; }
 #debug { position: fixed; bottom: 6px; right: 8px; font: 12px Consolas, monospace; background: #000a; padding: 4px 8px; border-radius: 6px; white-space: pre; }
 
 /* semaforo da largada (estilo do original) */
-#banner .tl { position: absolute; top: calc(92px + var(--safe-t)); left: 50%; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; gap: 4px; animation: pop .3s ease-out; }
+#banner .tl { position: absolute; top: calc(92px + var(--safe-t)); left: 50%; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; gap: 4px; animation: tlpop .3s ease-out; }
 #banner .tl .lamps { display: flex; flex-direction: column; gap: 10px; padding: 10px 12px; background: linear-gradient(#f7892b, #d9560f); border: 5px solid #8f3508; border-radius: 22px; filter: drop-shadow(0 6px 0 #0008); }
 #banner .tl .lamps i { width: 46px; height: 46px; border-radius: 50%; background: #15161c; box-shadow: inset 0 0 0 4px #0d0e12; }
 #banner .tl .lamps i.on.r { background: radial-gradient(#ff9a9a, #ff2a2a 60%); box-shadow: 0 0 34px 10px #ff2a2aaa, inset 0 0 0 4px #7a0d0d; }

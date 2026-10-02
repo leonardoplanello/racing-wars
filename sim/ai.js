@@ -3,14 +3,15 @@
 // Tres dificuldades; no Facil o bot que esta na frente comete erros de vez em quando e alivia o ritmo se disparar
 // (mais de `rubber.after` s na frente) ate o grupo chegar perto.
 import { CAR } from './car.js';
+import { ICE } from './items.js';
 
 export const DIFFICULTY_LABEL = { easy: 'Fácil', medium: 'Médio', hard: 'Difícil' };
 export const DIFFICULTY_ORDER = ['easy', 'medium', 'hard'];
 
 /** Parametros por dificuldade (editaveis no painel de debug). */
 export const DIFFICULTY = {
-  easy: { skill: [0.42, 0.58], tau: 0.22, look: 0.8, noise: 1.0, avoid: 0.7, itemHold: [2.5, 6], leaderMistakes: true, mistakeEvery: [4, 9], mistakeDur: [0.7, 1.4], mistakeStrength: 0.95, nitroCurves: true, rubber: { after: 5, near: 0.8, throttle: 0.7 } },
-  medium: { skill: [0.66, 0.8], tau: 0.1, look: 1.0, noise: 0.5, avoid: 1.0, itemHold: [0.8, 3.5], leaderMistakes: false, mistakeEvery: [8, 12], mistakeDur: [0.5, 1], mistakeStrength: 0.6, nitroCurves: false },
+  easy: { skill: [0.42, 0.58], tau: 0.22, look: 0.8, noise: 1.0, avoid: 0.7, itemHold: [2.5, 6], leaderMistakes: true, mistakeEvery: [4, 9], mistakeDur: [0.7, 1.4], mistakeStrength: 0.95, nitroCurves: true, rubber: { after: 5, near: 0.8, throttle: 0.7, humanGap: 0.8, humanThrottle: 0.6 } },
+  medium: { skill: [0.66, 0.8], tau: 0.1, look: 1.0, noise: 0.5, avoid: 1.0, itemHold: [0.8, 3.5], leaderMistakes: false, mistakeEvery: [8, 12], mistakeDur: [0.5, 1], mistakeStrength: 0.6, nitroCurves: false, rubber: { humanGap: 1.3, humanThrottle: 0.75 } },
   hard: { skill: [0.9, 1.0], tau: 0.04, look: 1.2, noise: 0.15, avoid: 1.3, itemHold: [0.3, 1.5], leaderMistakes: false, mistakeEvery: [8, 12], mistakeDur: [0.5, 1], mistakeStrength: 0.6, nitroCurves: false },
 };
 
@@ -161,17 +162,27 @@ export function think(brain, car, game, dt) {
     if (m.t <= 0) { brain.mistake = null; brain.mistakeIn = pick(brain.rng, d.mistakeEvery); }
   }
 
-  // Facil: se esta na frente por mais de `rubber.after` s, alivia o ritmo ate o grupo chegar perto
+  // Facil/Medio: bot que abriu vantagem sobre os jogadores REAIS alivia o ritmo ate eles chegarem perto
   const rb = d.rubber;
   if (rb && racing) {
     const rank = game.ranking();
-    let sum = 0, n = 0;
-    for (const o of rank) if (o.id !== car.id) { sum += o.progress; n++; }
-    const gapT = n ? (car.progress - sum / n) / Math.max(car.speed, 12) : 0; // s a frente da media do grupo
-    if (rank[0] === car && gapT > rb.near) brain.aheadT += dt; else if (gapT < rb.near * 0.5 || rank[0] !== car) { brain.aheadT = 0; brain.slow = false; }
-    if (brain.aheadT > rb.after) brain.slow = true;
-  } else brain.slow = false;
-  car.throttle = brain.slow ? d.rubber.throttle : 1;
+    let bestH = -Infinity;
+    for (const o of rank) if (!o.isBot && o.alive && o.progress > bestH) bestH = o.progress;
+    if (bestH > -Infinity) {
+      const gapH = (car.progress - bestH) / Math.max(car.speed, 12); // s a frente do humano mais adiantado
+      if (gapH > rb.humanGap) brain.slowH = true; else if (gapH < rb.humanGap * 0.6) brain.slowH = false;
+      brain.aheadT = 0; brain.slow = false;
+    } else if (rb.after !== undefined) {
+      // so bots na pista: o Facil segura o lider em relacao a media do grupo
+      brain.slowH = false;
+      let sum = 0, n = 0;
+      for (const o of rank) if (o.id !== car.id) { sum += o.progress; n++; }
+      const gapT = n ? (car.progress - sum / n) / Math.max(car.speed, 12) : 0; // s a frente da media do grupo
+      if (rank[0] === car && gapT > rb.near) brain.aheadT += dt; else if (gapT < rb.near * 0.5 || rank[0] !== car) { brain.aheadT = 0; brain.slow = false; }
+      if (brain.aheadT > rb.after) brain.slow = true;
+    }
+  } else { brain.slow = false; brain.slowH = false; }
+  car.throttle = brain.slowH ? d.rubber.humanThrottle : brain.slow ? d.rubber.throttle : 1;
 
   steer = clamp(steer, -1, 1);
   // reflexo: o volante nao salta de um valor para outro (mais lento no Facil)
@@ -201,8 +212,8 @@ export function think(brain, car, game, dt) {
         });
       } else if (car.item === 'whomp') ok = rank.some((c) => c.id !== car.id && Math.hypot(c.x - car.x, c.z - car.z) < 13);
       else if (car.item === 'ice') {
-        // o morteiro cai ~45 u a frente: atira se ha carros por la (raio de 9 u)
-        const tx2 = car.x + fx * 45, tz2 = car.z + fz * 45;
+        // o morteiro cai ICE.range u a frente: atira se ha carros por la (raio de 9 u)
+        const tx2 = car.x + fx * ICE.range, tz2 = car.z + fz * ICE.range;
         ok = rank.some((c) => c.id !== car.id && c.freeze <= 0 && Math.hypot(c.x - tx2, c.z - tz2) < 8);
       }
       if (ok) { fire = true; brain.holdT = 0; brain.hold = pick(brain.rng, d.itemHold); }

@@ -63,14 +63,24 @@ export function buildScenery(track, seed = 99) {
     x, z, yaw: Math.floor(rng() * 4) * (Math.PI / 2), brick: rng() < 0.5, hue: rng(),
   }));
 
+  // objetos colocados a mao no editor de mapa: def.objects = [{type:'tree'|'rock'|'house', x, z, yaw?, s?}]
+  for (const o of track.def.objects || []) {
+    const x = o.x * (track.def.scale || 1), z = o.z * (track.def.scale || 1), yaw = o.yaw ?? 0, s = o.s ?? 1;
+    if (o.type === 'tree') trees.push({ x, z, s, yaw, sy: s, hue: rng(), light: rng(), r: 1.15 * s });
+    else if (o.type === 'rock') rocks.push({ x, z, s, yaw, tone: rng(), r: 1.5 * s });
+    else if (o.type === 'house') houses.push({ x, z, yaw, brick: o.brick ?? rng() < 0.5, hue: rng() });
+  }
+
   // colisores (circulos) + grade para consulta rapida
   const colliders = [];
-  for (const t of trees) colliders.push({ x: t.x, z: t.z, r: t.r, kind: 'tree', top: 6 * t.sy });
-  for (const r of rocks) colliders.push({ x: r.x, z: r.z, r: r.r, kind: 'rock', top: 2.2 * r.s });
-  for (const h of houses) {
+  // dead: arvore/pedra destruida por um poder (some do cenario); idx = indice no array do render
+  trees.forEach((t, idx) => { t.dead = false; colliders.push({ x: t.x, z: t.z, r: t.r, kind: 'tree', top: 6 * t.sy, idx, ref: t, dead: false }); });
+  rocks.forEach((r, idx) => { r.dead = false; colliders.push({ x: r.x, z: r.z, r: r.r, kind: 'rock', top: 2.2 * r.s, idx, ref: r, dead: false }); });
+  houses.forEach((h, idx) => {
+    h.frozen = false;
     const c = Math.cos(h.yaw), s = Math.sin(h.yaw);
-    for (const off of [-3.2, 0, 3.2]) colliders.push({ x: h.x + c * off, z: h.z + s * off, r: 4.6, kind: 'house', top: 9 });
-  }
+    for (const off of [-3.2, 0, 3.2]) colliders.push({ x: h.x + c * off, z: h.z + s * off, r: 4.6, kind: 'house', top: 9, idx, ref: h, dead: false });
+  });
   const cgrid = new Map();
   const CC = 16;
   colliders.forEach((c, i) => {
@@ -88,9 +98,35 @@ export function buildScenery(track, seed = 99) {
       const n = Math.ceil((r + 6) / CC);
       for (let a = -n; a <= n; a++) for (let b = -n; b <= n; b++) {
         const l = cgrid.get(key(cx + a, cz + b));
-        if (l) for (const i of l) out.push(colliders[i]);
+        if (l) for (const i of l) if (!colliders[i].dead) out.push(colliders[i]);
       }
       return out;
+    },
+    /** Poder que acerta (x,z) com raio r: destroi arvores e pedras (casas resistem). Retorna os destruidos [{kind, idx, x, z}]. */
+    blast(x, z, r) {
+      const hit = [];
+      for (const c of colliders) {
+        if (c.dead || c.kind === 'house') continue;
+        if (Math.hypot(c.x - x, c.z - z) > r + c.r) continue;
+        c.dead = c.ref.dead = true;
+        hit.push({ kind: c.kind, idx: c.idx, x: c.x, z: c.z, h: c.top });
+      }
+      return hit;
+    },
+    /** Gelo: marca casas/arvores/pedras no raio como congeladas (so visual). Retorna os alvos novos. */
+    freeze(x, z, r) {
+      const hit = [];
+      for (const c of colliders) {
+        if (c.dead || c.ref.frozen) continue;
+        if (Math.hypot(c.x - x, c.z - z) > r + c.r) continue;
+        c.ref.frozen = true;
+        hit.push({ kind: c.kind, idx: c.idx, x: c.x, z: c.z });
+      }
+      return hit;
+    },
+    /** Nova corrida: tudo volta ao lugar. */
+    restore() {
+      for (const c of colliders) { c.dead = false; c.ref.dead = false; c.ref.frozen = false; }
     },
   };
 }

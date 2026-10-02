@@ -41,6 +41,7 @@ export class UI {
     this.screen.innerHTML = `<div class="scr" data-nav="ok">
       <div class="logo">RACING<br>WARS<small>ATÉ 8 JOGADORES · CELULAR É O CONTROLE</small></div>
       <button class="btn" data-nav="ok">▶ CLIQUE PARA COMEÇAR</button>
+      <a class="btn btn2" href="editor/" onclick="event.stopPropagation()">🗺 EDITOR DE MAPA</a>
       <div class="hint">Isto libera o som. Depois escaneie o QR Code com o celular.</div></div>`;
   }
 

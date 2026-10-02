@@ -7,7 +7,8 @@ import * as THREE from 'three';
 import { CAR } from '/sim/car.js';
 import { BOX, BOX_WRECK, WHEEL } from '/sim/body.js';
 import { CAMERA } from '/sim/camera.js';
-import { WHOMP, TRAIL, ICE, MISSILE } from '/sim/items.js';
+import { WHOMP, TRAIL, ICE, MISSILE, POWER } from '/sim/items.js';
+import { FREECAM } from './debug.js';
 import { RULES, CATCHUP } from '/sim/game.js';
 import { AI, DIFFICULTY } from '/sim/ai.js';
 import { ITEMS } from '/shared/protocol.js';
@@ -24,7 +25,8 @@ const GROUPS = [
     yawLook: [0, 60, 1], carY: [0, 3, 0.1], shakeMax: [0, 4, 0.05], kAlong: [1, 20, 0.1], kLat: [0.3, 12, 0.1], kYaw: [0.3, 12, 0.1], kHUp: [0.3, 12, 0.1], kHDown: [0.1, 12, 0.1],
     yawDead: [0, 0.2, 0.001], hDead: [0, 3, 0.05], lead: [0, 2, 0.05] }, deg: ['pitch'] },
   { id: 'car', name: 'Carro', objs: { CAR, BOX, BOX_WRECK, WHEEL } },
-  { id: 'items', name: 'Itens', objs: { WHOMP, TRAIL, ICE, MISSILE } },
+  { id: 'items', name: 'Itens', objs: { POWER, WHOMP, TRAIL, ICE, MISSILE } },
+  { id: 'free', name: 'Freecam', objs: { FREECAM } },
   { id: 'rules', name: 'Regras', objs: { RULES, CATCHUP } },
   { id: 'ai', name: 'IA dos bots', objs: { AI, DIFFICULTY } },
 ];

@@ -21,6 +21,7 @@ fs.mkdirSync(DIST, { recursive: true });
 
 copyDir(path.join(ROOT, 'public', 'host'), path.join(DIST, 'host'));
 copyDir(path.join(ROOT, 'public', 'pad'), path.join(DIST, 'pad'));
+copyDir(path.join(ROOT, 'public', 'editor'), path.join(DIST, 'editor'));
 copyDir(path.join(ROOT, 'shared'), path.join(DIST, 'shared'));
 copyDir(path.join(ROOT, 'sim'), path.join(DIST, 'sim'));
 
@@ -42,7 +43,7 @@ const config = `<script>window.RW=${JSON.stringify({ static: true, relay: RELAY 
 function page(srcFile, prefix) {
   let html = fs.readFileSync(srcFile, 'utf8');
   html = html.replace(/<script type="importmap">[\s\S]*?<\/script>\s*/, '');
-  html = html.replace(/(href|src)="\/(host|pad)\//g, (_, a, d) => `${a}="${prefix}${d}/`);
+  html = html.replace(/(href|src)="\/(host|pad|editor)\//g, (_, a, d) => `${a}="${prefix}${d}/`);
   const map = {
     imports: {
       three: `${prefix}vendor/three/three.module.js`,
@@ -63,6 +64,7 @@ const padSrc = path.join(ROOT, 'public', 'pad', 'index.html');
 fs.writeFileSync(path.join(DIST, 'index.html'), page(hostSrc, './'));
 fs.writeFileSync(path.join(DIST, 'host', 'index.html'), page(hostSrc, '../'));
 fs.writeFileSync(path.join(DIST, 'pad', 'index.html'), page(padSrc, '../'));
+fs.writeFileSync(path.join(DIST, 'editor', 'index.html'), page(path.join(ROOT, 'public', 'editor', 'index.html'), '../'));
 fs.writeFileSync(path.join(DIST, '404.html'), '<!doctype html><meta charset="utf-8"><meta http-equiv="refresh" content="0;url=./"><a href="./">Racing Wars</a>');
 fs.writeFileSync(path.join(DIST, '.nojekyll'), '');
 

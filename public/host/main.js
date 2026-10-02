@@ -390,6 +390,21 @@ function handleEvents(events) {
         break;
       }
       case 'hit': vib(e.car, [250]); break;
+      case 'blast': {
+        // poderes quebram as cercas no raio
+        for (const b of world?.breakFencesIn(e.x, e.z, e.radius) || []) {
+          debris.fence(b.x, b.z, b.dx, b.dz, b.speed, b.y, b.kind);
+          if (b.kind === 'iron') fx.sparks(b.x, b.z, 8, 0, 0, b.y); else fx.woodChips(b.x, b.z, b.dx, b.dz, b.speed, b.y + 1);
+        }
+        break;
+      }
+      case 'sceneryHit': {
+        world?.hideScenery(e.kind, e.idx);
+        fx.leaves(e.x, e.z, 1.2, e.kind === 'rock', gnd(e.x, e.z));
+        break;
+      }
+      case 'sceneryFreeze': world?.freezeScenery(e.kind, e.idx); break;
+      case 'sceneryReset': world?.restoreScenery(); break;
       case 'iceBurst': fx.frost(e.x, e.z, e.y, e.radius); audio.play('iceBurst'); cam.shake = Math.max(cam.shake, 0.6); break;
       case 'freeze': vib(e.car, [60, 40, 60]); break;
       case 'unfreeze': {
@@ -487,6 +502,15 @@ function tick(dt, now) {
             const r = think(S.brains.get(c.id), c, g, dt);
             g.setInput(c.id, r.steer, r.fire);
           }
+        } else if (dbg.on && dbg.free) {
+          // freecam ligada (WASD move a camera): o carro humano dirige sozinho, como um bot
+          if (c.alive && c.near) {
+            let br = S.brains.get(c.id);
+            if (!br) S.brains.set(c.id, (br = makeBrain(makeRng(c.id + 11), null, S.difficulty)));
+            const r = think(br, c, g, dt);
+            g.setInput(c.id, r.steer, r.fire);
+          }
+          if (kind === 'kbd') kbd.takeFire(); else { const d = S.devices.get(c.id); if (d) d.fireQueued = false; }
         } else if (kind === 'kbd') {
           g.setInput(c.id, kbd.steer, kbd.takeFire(), kbd.rev);
         } else {

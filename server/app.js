@@ -35,6 +35,7 @@ function resolveFile(urlPath) {
   let p = decodeURIComponent(urlPath.split('?')[0]);
   if (p === '/') p = '/host/index.html';
   if (p === '/pad' || p === '/pad/') p = '/pad/index.html';
+  if (p === '/editor' || p === '/editor/') p = '/editor/index.html';
   let base;
   let rel;
   if (p.startsWith('/sim/') || p.startsWith('/shared/')) {

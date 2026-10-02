@@ -54,7 +54,12 @@ export const CAR = {
   offroadMax: 28, // distancia alem da borda da estrada em que o carro explode
   crashSpeed: 20, // velocidade vertical de pouso (u/s) acima da qual o carro capota
   wreckMass: 2.5, // a carcaca e bem mais pesada que o carro
-  iceFriction: 0.3, // atrito (1/s) do carro dentro do cubo de gelo: desliza quase sem perder velocidade
+  boostMass: 1.7, // com nitro o carro pesa mais nas batidas: da para empurrar quem esta na frente para fora do quadro
+  boostGrip: 1.6, // com nitro: aderencia lateral e de tracao multiplicada (carro firme, sem escorregar)
+  boostSteer: 1.5, // com nitro: o esterco cai bem menos com a velocidade
+  iceKeep: 0.85, // carro congelado desacelera ate esta fracao da velocidade normal (cruise) e mantem
+  iceDecel: 1.2, // quao rapido (1/s) ele chega nessa velocidade
+  rearSpin: 1.2, // giro extra (x) quando se bate na roda traseira de um carro
 };
 
 
@@ -161,7 +166,7 @@ export function stepCar(car, track, dt, events) {
     car.vx *= 0.99;
     car.vz *= 0.99;
     car.spin += car.spinVel * dt;
-    if (car.fall > 1.1) {
+    if (car.fall > (car.fallCause === 'chasm' ? 6 : 1.1)) {
       car.state = 'dead';
       car.hidden = true;
     }
@@ -253,8 +258,12 @@ function stunStep(car, track, dt) {
 
 /** Dentro do cubo de gelo: sem tracao nem esterço, rumo travado; desliza em linha reta quase sem atrito. */
 function freezeStep(car, dt) {
-  const k = Math.exp(-CAR.iceFriction * dt);
-  car.vx *= k; car.vz *= k;
+  // mantem a velocidade que tinha e vai desacelerando ate iceKeep (85%) da velocidade normal (nunca abaixo dela)
+  const sp = Math.hypot(car.vx, car.vz), floor = Math.min(sp, CAR.iceKeep * CAR.cruise);
+  if (sp > floor + 1e-3) {
+    const k = (floor + (sp - floor) * Math.exp(-CAR.iceDecel * dt)) / sp;
+    car.vx *= k; car.vz *= k;
+  }
   car.w *= Math.exp(-10 * dt);
   car.h += car.w * dt;
   car.steerSm = 0;
@@ -359,17 +368,19 @@ function driveStep(car, surf, dt) {
   let w = car.w;
 
   const mu = car.onVerge ? SURF_MU[surf] * 0.62 : SURF_MU[surf];
+  const bg = car.boost > 0 ? CAR.boostGrip : 1; // nitro = alto controle
   const FRONT_LOAD = CAR.b / CAR.wheelbase, REAR_LOAD = CAR.a / CAR.wheelbase; // fracao do peso em cada eixo (lido ao vivo)
-  const fmaxF = mu * CAR.g * FRONT_LOAD;
+  const fmaxF = mu * CAR.g * FRONT_LOAD * bg;
   // traseira atingida: perde aderencia por um instante e o carro roda com facilidade
-  const fmaxR0 = mu * CAR.g * REAR_LOAD * (1 - 0.6 * Math.min(1, car.destab / 0.5));
+  const fmaxR0 = mu * CAR.g * REAR_LOAD * bg * (1 - 0.6 * Math.min(1, car.destab / 0.5));
 
   // volante suavizado; menos esterco em alta velocidade
   car.steerSm += Math.max(-CAR.steerRate * dt, Math.min(CAR.steerRate * dt, car.steer - car.steerSm));
   // o angulo do volante e limitado pela aderencia (auxilio de direcao): evita rodar so de esterçar
   const us = Math.max(Math.abs(u), 3);
-  const gripCap = (CAR.gripAssist * mu * CAR.g * CAR.wheelbase) / (us * us);
-  const dMax = Math.min(CAR.steerMax / (1 + (u / CAR.steerRef) ** 2), Math.max(gripCap, 0.02));
+  const gripCap = (CAR.gripAssist * mu * CAR.g * CAR.wheelbase * bg) / (us * us);
+  const sRef = CAR.steerRef * (bg > 1 ? CAR.boostSteer : 1);
+  const dMax = Math.min(CAR.steerMax / (1 + (u / sRef) ** 2), Math.max(gripCap, 0.02));
   const sIn = Math.sign(car.steerSm) * Math.abs(car.steerSm) ** CAR.steerCurve;
   const delta = sIn * dMax * (car.rev > 0 ? -1 : 1);
 
@@ -400,7 +411,7 @@ function driveStep(car, surf, dt) {
   const alphaR = Math.atan2(v - CAR.b * w, ua);
   const fyF = -fmaxF * Math.tanh(alphaF / CAR.alphaSatF);
   // circulo de atrito do eixo traseiro: quanto mais tracao, menos forca lateral
-  const ratio = Math.min(0.85, Math.abs(fx_drive) / (fmaxR0 * 1.15));
+  const ratio = Math.min(bg > 1 ? 0.5 : 0.85, Math.abs(fx_drive) / (fmaxR0 * 1.15));
   const fmaxR = fmaxR0 * Math.sqrt(1 - ratio * ratio);
   const fyR = -fmaxR * Math.tanh(alphaR / CAR.alphaSatR);
 
@@ -510,6 +521,10 @@ export function updateProgress(car, track) {
 }
 
 const CONTACTS = [];
+/** Massa na colisao: carcaca pesada; com nitro o carro e um aríete (empurra os outros para tras do quadro). */
+function collideMass(c) {
+  return (c.state === 'wreck' ? CAR.wreckMass : 1) * (c.boost > 0 ? CAR.boostMass : c.freeze > 0 ? 1.25 : 1);
+}
 /**
  * Colisao carro x carro: casco de 6 circulos (corpo + rodas). Os contatos simultaneos (varios circulos de uma batida)
  * sao resolvidos juntos por impulsos sequenciais acumulados (8 iteracoes), entao o impulso se divide entre eles e
@@ -520,9 +535,9 @@ export function collideCars(a, b, events) {
   if (Math.abs(a.y - b.y) > 2.2) return; // alturas diferentes (um em cima do plateau): nao se tocam
   if ((a.x - b.x) ** 2 + (a.z - b.z) ** 2 > 20) return; // longe demais para qualquer circulo se tocar
   const R2 = CAR.circleR * 2;
-  const ma = (a.state === 'wreck' ? CAR.wreckMass : 1) * (a.boost > 0 || a.freeze > 0 ? 1.25 : 1), mb = (b.state === 'wreck' ? CAR.wreckMass : 1) * (b.boost > 0 || b.freeze > 0 ? 1.25 : 1);
+  const ma = collideMass(a), mb = collideMass(b);
   const Ia = CAR.inertia * ma, Ib = CAR.inertia * mb;
-  let n = 0, deep = 0, dnx = 0, dnz = 0;
+  let n = 0, deep = 0, sx = 0, sz = 0;
   for (let i = 0; i < HULL.length; i++) {
     hullPos(a, i, HP);
     const ax = HP.x, az = HP.z;
@@ -534,7 +549,8 @@ export function collideCars(a, b, events) {
       const d = Math.sqrt(d2);
       const nx = dx / d, nz = dz / d; // de a para b
       const pen = R2 - d;
-      if (pen > deep) { deep = pen; dnx = nx; dnz = nz; }
+      if (pen > deep) deep = pen;
+      sx += nx * pen; sz += nz * pen; // normal media ponderada: nenhum circulo isolado prende o carro
       const px = ax + nx * CAR.circleR, pz = az + nz * CAR.circleR;
       const rax = px - a.x, raz = pz - a.z, rbx = px - b.x, rbz = pz - b.z;
       const vn0 = (b.vx - b.w * rbz - (a.vx - a.w * raz)) * nx + (b.vz + b.w * rbx - (a.vz + a.w * rax)) * nz;
@@ -549,10 +565,17 @@ export function collideCars(a, b, events) {
     }
   }
   if (deep > 0) {
-    // separa pelo par mais fundo (proporcional ao inverso da massa)
+    // separa pela normal media de todos os pares sobrepostos (proporcional ao inverso da massa)
+    const sl = Math.hypot(sx, sz) || 1, dnx = sx / sl, dnz = sz / sl;
     const wa = mb / (ma + mb), wb = ma / (ma + mb), s = Math.min(deep, 0.5) * 0.8 + deep * 0.2;
     a.x -= dnx * s * wa; a.z -= dnz * s * wa;
     b.x += dnx * s * wb; b.z += dnz * s * wb;
+    // encostados: ativa o desengate (re) de quem ficou parado empurrando; acorda carcaca empurrada
+    // so conta como "preso" (re) quem esta empurrando de frente: encostar de lado nao prende nem dispara a re
+    if (dnx * Math.cos(a.h) + dnz * Math.sin(a.h) > 0.6) a.contact = true;
+    if (-(dnx * Math.cos(b.h) + dnz * Math.sin(b.h)) > 0.6) b.contact = true;
+    if (a.state === 'wreck' && deep > 0.05) a.asleep = false;
+    if (b.state === 'wreck' && deep > 0.05) b.asleep = false;
   }
   if (!n) return;
   for (let it = 0; it < 8; it++) {
@@ -572,14 +595,15 @@ export function collideCars(a, b, events) {
     const c = CONTACTS[q];
     if (!c.acc) continue;
     // roda traseira: bater ali desestabiliza muito mais (rodopia e perde a traseira)
-    if (-c.vn0 > 2.5) {
-      if (c.ri) { a.destab = Math.max(a.destab, Math.min(1.1, -c.vn0 / 7)); if (Math.abs(-c.nx * Math.sin(a.h) + c.nz * Math.cos(a.h)) > 0.55) a.w -= (1.2 * c.acc * c.rna) / Ia; }
-      if (c.rk) { b.destab = Math.max(b.destab, Math.min(1.1, -c.vn0 / 7)); if (Math.abs(-c.nx * Math.sin(b.h) + c.nz * Math.cos(b.h)) > 0.55) b.w += (1.2 * c.acc * c.rnb) / Ib; }
+    // (qualquer encosto forte ja gira o alvo: empurrar a roda de tras e a mecanica central do jogo)
+    if (-c.vn0 > 0.8) {
+      if (c.ri) { a.destab = Math.max(a.destab, Math.min(1.1, -c.vn0 / 7)); a.w -= (CAR.rearSpin * c.acc * c.rna) / Ia; }
+      if (c.rk) { b.destab = Math.max(b.destab, Math.min(1.1, -c.vn0 / 7)); b.w += (CAR.rearSpin * c.acc * c.rnb) / Ib; }
     }
     // atrito tangencial leve
     const tx = -c.nz, tz = c.nx;
     const vt = (b.vx - b.w * c.rbz - (a.vx - a.w * c.raz)) * tx + (b.vz + b.w * c.rbx - (a.vz + a.w * c.rax)) * tz;
-    const jt = Math.max(-0.2 * c.acc, Math.min(0.2 * c.acc, -vt * 0.3));
+    const jt = Math.max(-0.08 * c.acc, Math.min(0.08 * c.acc, -vt * 0.3)); // pouco atrito: os carros escorregam um pelo outro
     a.vx -= (jt * tx) / ma; a.vz -= (jt * tz) / ma;
     b.vx += (jt * tx) / mb; b.vz += (jt * tz) / mb;
     if (-c.vn0 > worst) { worst = -c.vn0; hx = c.px; hz = c.pz; }

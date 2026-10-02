@@ -5,6 +5,8 @@ import * as THREE from 'three';
 import { ITEMS } from '/shared/protocol.js';
 
 const SPEEDS = [1, 0.5, 0.25, 2];
+/** Velocidade da freecam (u/s), editavel no F4. `fast` vale com Shift. */
+export const FREECAM = { speed: 30, fast: 90 };
 
 export class DebugTools {
   constructor(sc, { onToggle } = {}) {
@@ -94,10 +96,10 @@ export class DebugTools {
   /** Chamar depois de sc.frame(): se a freecam esta ativa, assume a camera Three. */
   applyCamera(dt) {
     if (!(this.on && this.free)) return;
-    const k = this.keys, sp = (k.has('shift') ? 90 : 30) * dt;
+    const k = this.keys, sp = (k.has('shift') ? FREECAM.fast : FREECAM.speed) * dt;
     const fx = Math.cos(this.yaw) * Math.cos(this.pitch), fy = Math.sin(this.pitch), fz = Math.sin(this.yaw) * Math.cos(this.pitch);
     const rx = -Math.sin(this.yaw), rz = Math.cos(this.yaw);
-    const mv = (k.has('i') ? 1 : 0) - (k.has('k') ? 1 : 0), st = (k.has('l') ? 1 : 0) - (k.has('j') ? 1 : 0), up = (k.has('o') ? 1 : 0) - (k.has('u') ? 1 : 0);
+    const mv = (k.has('w') ? 1 : 0) - (k.has('s') ? 1 : 0), st = (k.has('d') ? 1 : 0) - (k.has('a') ? 1 : 0), up = (k.has('z') || k.has('o') ? 1 : 0) - (k.has('q') || k.has('u') ? 1 : 0);
     this.pos.x += (fx * mv + rx * st) * sp;
     this.pos.y += (fy * mv + up) * sp;
     this.pos.z += (fz * mv + rz * st) * sp;
@@ -146,7 +148,7 @@ export class DebugTools {
     this.el.textContent = `DEBUG (F3)  ${fps} fps\n${extra}\n` +
       `[M] corrida infinita ${f(this.infinite)}   [N] sem corte ${f(this.noCut)}\n` +
       `[G] imortal ${f(this.god)}   [H] hitboxes ${f(this.hitboxes)}\n` +
-      `[F] freecam ${f(this.free)} (IJKL mover, U/O altura, Shift rapido, arrastar mouse)\n` +
+      `[F] freecam ${f(this.free)} (WASD mover, Z/Q altura, Shift rapido, arrastar mouse; seu carro vira bot)\n` +
       `[T] velocidade x${SPEEDS[this.speedIdx]}   [V] freeze ${f(this.frozen)} ([.] 1 quadro)   [R] renasce eu   [X] explode bots\n` +
       `[F4] editor (valores, camera, pista)   [E] selecionar area ${f(this.selecting)}\n` +
       `[1-5] da item: nitro/mina/missil/whomp/gelo`;

@@ -189,6 +189,26 @@ export function buildTruck(hex) {
     glow.position.set(-0.45, 4.5, 0);
     grp.add(cube, glow);
   }
+  // canhao de gelo no teto: base, cano apontando para a frente e para cima, boca azul brilhante
+  {
+    const grp = holder('ice');
+    const icy = new THREE.MeshStandardMaterial({ color: 0x9fdcff, emissive: 0x3aa8ff, emissiveIntensity: 0.9, roughness: 0.15, metalness: 0.2 });
+    const base = new THREE.Mesh(new THREE.CylinderGeometry(0.75, 0.9, 0.4, 14), metal);
+    base.position.set(-0.45, 3.1, 0);
+    const pivot = new THREE.Group();
+    pivot.position.set(-0.45, 3.5, 0);
+    pivot.rotation.z = 0.7; // cano levantado, apontando para a frente (+x)
+    const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.38, 0.5, 2.1, 14).rotateZ(-Math.PI / 2), m.dark);
+    barrel.position.x = 0.9;
+    const muzzle = new THREE.Mesh(new THREE.TorusGeometry(0.44, 0.1, 8, 16).rotateY(Math.PI / 2), icy);
+    muzzle.position.x = 1.98;
+    const tip = new THREE.Mesh(new THREE.IcosahedronGeometry(0.34, 0), icy);
+    tip.position.x = 1.75;
+    const tank = new THREE.Mesh(new THREE.CylinderGeometry(0.55, 0.55, 0.9, 12).rotateX(Math.PI / 2), icy);
+    tank.position.set(-0.2, 0.6, 0);
+    pivot.add(barrel, muzzle, tip, tank);
+    grp.add(base, pivot);
+  }
   // mina no teto (mesmo modelo da mina solta na pista)
   {
     const grp = holder('mine');

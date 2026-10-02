@@ -20,6 +20,7 @@ server/index.js        http estático + WebSocket relay + /api/lan
 shared/protocol.js     mensagens, codec binário de input, cores
 sim/                   rng, track, car, body (corpo rígido 3D), items, game (rodadas/pontos/pneus), ai, camera, scenery (colisores do cenário)
 sim/tracks/            definição das pistas
+public/editor/         editor de mapa (pontos, rampas, materiais, objetos)
 public/host/           tela principal (main, net, ui, audio, kbd, debug, debug-editor)
 public/host/render/    Three.js: scene, world (pista/cenário), models (picape, semáforo), cars, fx, textures (canvas)
 public/pad/            controle do celular
