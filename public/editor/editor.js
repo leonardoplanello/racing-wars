@@ -6,10 +6,13 @@ import { createScene } from '/host/render/scene.js';
 import { buildWorld } from '/host/render/world.js';
 import { buildTrack } from '/sim/track.js';
 import testCircuit from '/sim/tracks/testcircuit.js';
+import downtown from '/sim/tracks/downtown.js';
 
 const LS_TRACK = 'rw-debug-track';
-const TRACK_ID = testCircuit.id;
 const qs = new URLSearchParams(location.search);
+const BASES = { [testCircuit.id]: testCircuit, [downtown.id]: downtown }; // ?track=<id> escolhe a pista
+const TRACK_ID = BASES[qs.get('track')] ? qs.get('track') : testCircuit.id;
+const BASE = BASES[TRACK_ID];
 const quality = qs.get('q') === 'high' ? 'high' : 'low';
 const SURF_NAME = ['asfalto', 'madeira', 'terra', 'paralelepípedo'];
 const OBJ_TYPES = { tree: { label: 'Árvore', color: 0x3fbf5a, r: 2.2 }, rock: { label: 'Pedra', color: 0x9aa3b2, r: 2.6 }, house: { label: 'Casa', color: 0xe0a060, r: 5.5 } };
@@ -19,7 +22,7 @@ const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&l
 // ------------------------------------------------------------------ estado
 function loadDef() {
   try { const d = JSON.parse(localStorage.getItem(LS_TRACK + ':' + TRACK_ID) || 'null'); if (d && Array.isArray(d.points)) return d; } catch { /* sem edicao salva */ }
-  return clone(testCircuit);
+  return clone(BASE);
 }
 let def = loadDef();
 def.objects ||= [];
@@ -69,6 +72,7 @@ function rebuildWorld() {
   if (!track) return;
   if (world) { scene.remove(world.group); disposeGroup(world.group); }
   try {
+    sc.applyTheme(track.theme);
     world = buildWorld(track, quality);
     scene.add(world.group);
   } catch (e) { world = null; status('Erro ao montar o mundo: ' + e.message, true); }
@@ -181,6 +185,7 @@ function refreshOverlay() {
   });
   // objetos
   def.objects.forEach((o, i) => {
+    if (o.x === undefined) return; // props urbanos posicionados na pista (at: [fracao, deslocamento]) nao tem marcador
     const t = OBJ_TYPES[o.type] || OBJ_TYPES.tree;
     const m = new THREE.Mesh(discG, mat(sel && sel.kind === 'obj' && sel.i === i ? 0xffd60a : t.color, 0.8));
     m.position.set(o.x * k, 0.9, o.z * k); m.scale.setScalar(t.r * (o.s ?? 1)); addMarker(m, 'obj', i, 0);
@@ -439,7 +444,7 @@ function renderSide() {
   h += `<h3>Caixas de item (${(def.boxGroups || []).length})</h3><p class="small">Ferramenta 📦: clique na pista. Cada grupo vira 3–5 caixas conforme a copa.</p>`;
   (def.boxGroups || []).forEach((f, i) => { h += `<div class="row"><label>grupo ${i + 1}</label><input type="number" step="0.005" data-p="boxGroups.${i}" data-t="n" value="${f}"><button data-a="rm" data-k="boxGroups" data-i="${i}">×</button></div>`; });
   h += `<h3>Objetos (${def.objects.length})</h3>`;
-  def.objects.forEach((o, i) => { h += `<div class="row"><button data-sel="obj:${i}" style="flex:1;text-align:left">${OBJ_TYPES[o.type]?.label} ${i + 1} (${o.x}, ${o.z})</button></div>`; });
+  def.objects.forEach((o, i) => { h += `<div class="row"><button data-sel="obj:${i}" style="flex:1;text-align:left">${OBJ_TYPES[o.type]?.label || o.type} ${i + 1} (${o.x ?? 's=' + o.at?.[0]}, ${o.z ?? o.at?.[1]})</button></div>`; });
   void k;
   $side.innerHTML = h;
 }
@@ -475,10 +480,10 @@ $side.addEventListener('click', (e) => {
   else if (a === 'rm') { def[b.dataset.k].splice(+b.dataset.i, 1); sel = null; changed({ panel: true }); }
   else if (a === 'del') removeSel();
   else if (a === 'save') save();
-  else if (a === 'test') { save(); window.open('../?debug', '_blank'); }
+  else if (a === 'test') { save(); window.open('../?debug&track=' + TRACK_ID, '_blank'); }
   else if (a === 'export') exportJson();
   else if (a === 'import') document.getElementById('imp').click();
-  else if (a === 'reset') { if (confirm('Descartar as edições e voltar à pista original?')) { localStorage.removeItem(LS_TRACK + ':' + TRACK_ID); def = clone(testCircuit); def.objects = []; sel = null; fitView(); changed({ panel: true, now: true }); dirty = false; } }
+  else if (a === 'reset') { if (confirm('Descartar as edições e voltar à pista original?')) { localStorage.removeItem(LS_TRACK + ':' + TRACK_ID); def = clone(BASE); def.objects ||= []; sel = null; fitView(); changed({ panel: true, now: true }); dirty = false; } }
   else if (a === 'oval') { if (confirm('Substituir a pista atual por um oval simples?')) newOval(); }
 });
 $side.addEventListener('change', (e) => {

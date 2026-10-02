@@ -14,15 +14,24 @@ celulares (/pad) --WebSocket--> servidor Node <--WebSocket-- host (/ , tela prin
 - **Valores ao vivo**: constantes (`CAR`, `CAMERA`, `WHOMP`...) são objetos mutáveis lidos a cada passo; o editor de debug (`public/host/debug-editor.js`) as edita sem recarregar.
 - **Relevo da pista**: `def.hills` (`from`, `to`, `height`, `rise`, `fall`, `rails`) vira `track.ELEV`; `fall: 0` faz uma rampa de salto (empina até o lábio). `track.RAILS` marca onde há cerca. `def.chasms` cria precipícios ao lado da pista (`track.CH`, `track.chasmAt`): quem entra cai e morre. Quem está abaixo do tabuleiro bate na falésia (`track.cliffAt`).
 
+**Pistas urbanas (Downtown)** — campos extras de `def`:
+- `widths: [{from,to,hw,blend}]`: meia-largura por trecho (`track.HW`, `hwAt/edgeAt`); o render lê `HW[k]`, não mais uma largura única.
+- `openZones: [{from,to,side}]`: sem muro naquele lado (`track.OPEN`, `hardWall(i, d)`): praça, beco, brecha do guard-rail.
+- `walls: [{from,to,style}]` e `wallStyle` (`fence|building|jersey|none`): estilo do muro; `building` gera os prédios atrás do muro (`render/city.js`).
+- `hills[].skin`: `'truck'` (chassi laranja + rodas) e `'viaduct'` (laje fina + pilares).
+- `props` (regras: `{type, every, from, to, side}`) e `objects` (`{type, x, z}` ou `{type, at:[fração, deslocamento|'R'|'L']}`): props urbanos de `sim/scenery.js › PROPS` (poste, semáforo, placa, hidrante, cone, ponto de ônibus, bomba, pilar, caixote, prédio, fonte). O comportamento (`knock`, `solid`, `explosive`, `immune`) fica na tabela `PROPS`; `Game.updatePumps` cuida das bombas.
+- `boxes: [{x,z,h}]`: caixas de item avulsas (`h` = suspensa, só quem está no ar pega); `structures`: piso, posto, pórtico (`render/structures.js`).
+- `theme`: `kind:'city'`, `sky`, `fog`, `hemi`, `sun`, `exposure` (`scene.applyTheme`). `laps` opcional.
+
 ## Pastas
 ```
 server/index.js        http estático + WebSocket relay + /api/lan
 shared/protocol.js     mensagens, codec binário de input, cores
 sim/                   rng, track, car, body (corpo rígido 3D), items, game (rodadas/pontos/pneus), ai, camera, scenery (colisores do cenário)
-sim/tracks/            definição das pistas
+sim/tracks/            definição das pistas (testcircuit, downtown)
 public/editor/         editor de mapa (pontos, rampas, materiais, objetos)
 public/host/           tela principal (main, net, ui, audio, kbd, debug, debug-editor)
-public/host/render/    Three.js: scene, world (pista/cenário), models (picape, semáforo), cars, fx, textures (canvas)
+public/host/render/    Three.js: scene (tema), world (pista/cenário), city (prédios/skyline), props, structures, models (picape, semáforo), cars, fx, textures (canvas)
 public/pad/            controle do celular
 tools/                 smoke.js, fake-phones.js
 test/                  testes node --test

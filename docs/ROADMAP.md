@@ -48,9 +48,16 @@
 - Bots em 3 dificuldades (o líder do Fácil erra) e IA melhor na largada/spawn
 - Debug: freeze com passo, editor de valores/pista ao vivo e seleção de área
 
+## Versão 0.7: Downtown
+- Pista urbana de ~4 min por volta (7,6 mil u): quarteirões, posto de gasolina, bairro antigo, carretas-cegonha, viaduto e rodovia
+- Larguras por trecho, zonas abertas, muros de prédio/concreto, tema (céu, névoa, luzes) por pista
+- Props: poste, semáforo, placa de pare, hidrante, cone, ponto de ônibus, neon; bombas de combustível que explodem em cadeia e queimam até o fim da partida
+- Caixas suspensas (só no ar), 3 atalhos opcionais, salto obrigatório do viaduto para a rodovia
+- Editor de mapa e `tools/balance.js` aceitam a pista
+
 ## Próximos passos
 - Gerador de pistas com ~5 min por volta
-- Downtown, Water Hill, Death Mountain, Farm Jump (cenário rico por bioma)
+- Water Hill, Death Mountain, Farm Jump (cenário rico por bioma)
 - Farm Jump (rampas e estado aéreo já existem na base)
 - Seleção de copa e circuito polida
 - Ajuste fino de física e IA de bots por dificuldade

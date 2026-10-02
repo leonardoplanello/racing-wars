@@ -6,6 +6,10 @@ import { buildScenery } from '/sim/scenery.js';
 import { gridSlot } from '/sim/game.js';
 import * as TX from './textures.js';
 import { buildStartGantry } from './models.js';
+import { buildCity } from './city.js';
+import { PropsView } from './props.js';
+import { buildStructures } from './structures.js';
+import { PROPS } from '/sim/scenery.js';
 
 const RIVER_HALF = 34; // meia-largura do rio em volta da ponte
 const WATER_Y = -1.1;
@@ -58,7 +62,16 @@ export function buildWorld(track, quality = 'high', opts = {}) {
   const breakables = []; // trechos de cerca que quebram quando um carro passa
   const meshes = {};
   const { N, X, Z, TX: TXs, TZ: TZs, NX, NZ, ELEV, BRIDGE, SURFACE } = track;
-  const hw = track.halfWidth, edge = hw + track.verge;
+  const HWa = track.HW, vg = track.verge;
+  const hw = track.halfWidth, edge = hw + vg; // largura-base (largada)
+  const HWf = (k) => HWa[k % N], EDGEf = (k) => HWa[k % N] + vg;
+  const theme = track.theme || {};
+  const city = theme.kind === 'city';
+  let maxHW = 0;
+  for (let i = 0; i < N; i++) maxHW = Math.max(maxHW, HWa[i]);
+  let bx0 = 1e9, bx1 = -1e9, bz0 = 1e9, bz1 = -1e9;
+  for (let i = 0; i < N; i++) { bx0 = Math.min(bx0, X[i]); bx1 = Math.max(bx1, X[i]); bz0 = Math.min(bz0, Z[i]); bz1 = Math.max(bz1, Z[i]); }
+  const GROUND_R = Math.max(1400, Math.max(bx1 - bx0, bz1 - bz0) / 2 + 800); // o chao cobre pistas grandes
   const L = track.length, ds = track.ds;
 
   // ------------------------------------------------------------ materiais
@@ -71,6 +84,7 @@ export function buildWorld(track, quality = 'high', opts = {}) {
     iron: new THREE.MeshStandardMaterial({ color: 0x1a1d26, roughness: 0.45, metalness: 0.6 }),
     steel: new THREE.MeshStandardMaterial({ map: TX.steelTexture(), roughness: 0.5, metalness: 0.4 }),
     logs: new THREE.MeshStandardMaterial({ map: TX.woodTexture(), roughness: 0.9, color: 0xd9b48a }),
+    verge: new THREE.MeshStandardMaterial({ map: city ? TX.sidewalkTexture() : TX.dirtTexture(), roughness: 1, side: THREE.DoubleSide }),
     paint: new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.6, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }),
     yellow: new THREE.MeshStandardMaterial({ color: 0xffd23a, roughness: 0.6, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }),
   };
@@ -78,7 +92,8 @@ export function buildWorld(track, quality = 'high', opts = {}) {
   for (const k of ['wood', 'asphalt', 'dirt', 'cobble', 'logs']) M[k].side = THREE.DoubleSide;
 
   // ------------------------------------------------------------ faixas (pista)
-  const classOf = (i) => (BRIDGE[i] ? 'wood' : SURFACE[i] === 3 ? 'cobble' : SURFACE[i] === 2 ? 'dirt' : SURFACE[i] === 1 ? 'wood' : 'asphalt');
+  const HSK = track.HSKIN;
+  const classOf = (i) => (BRIDGE[i] ? 'wood' : HSK[i] === 1 ? 'steel' : SURFACE[i] === 3 ? 'cobble' : SURFACE[i] === 2 ? 'dirt' : SURFACE[i] === 1 ? 'wood' : 'asphalt');
   const runs = [];
   {
     let s = 0;
@@ -95,8 +110,9 @@ export function buildWorld(track, quality = 'high', opts = {}) {
       const k = i % N;
       const y = ELEV[k] + yOff;
       const v = (i * ds) / vSc;
-      pos.push(X[k] + NX[k] * o0, y, Z[k] + NZ[k] * o0, X[k] + NX[k] * o1, y, Z[k] + NZ[k] * o1);
-      uv.push(o0 / uSc, v, o1 / uSc, v);
+      const p0 = typeof o0 === 'function' ? o0(k) : o0, p1 = typeof o1 === 'function' ? o1(k) : o1;
+      pos.push(X[k] + NX[k] * p0, y, Z[k] + NZ[k] * p0, X[k] + NX[k] * p1, y, Z[k] + NZ[k] * p1);
+      uv.push(p0 / uSc, v, p1 / uSc, v);
       if (vi > 0) idx.push(vi - 2, vi - 1, vi, vi - 1, vi + 1, vi);
       vi += 2;
     }
@@ -118,17 +134,17 @@ export function buildWorld(track, quality = 'high', opts = {}) {
   };
 
   for (const r of runs) {
-    const half = r.cls === 'wood' && BRIDGE[r.a] ? edge : hw;
-    add(strip(r.a, r.b, -half, half, 0.02, r.cls === 'dirt' ? 12.8 : r.cls === 'cobble' ? 12.8 : 6.4, r.cls === 'cobble' ? 12.8 : 6.4), M[r.cls]);
-    if (r.cls !== 'wood' || !BRIDGE[r.a]) {
+    const half = (r.cls === 'wood' && BRIDGE[r.a]) || r.cls === 'steel' ? EDGEf : HWf;
+    add(strip(r.a, r.b, (k) => -half(k), half, 0.02, r.cls === 'dirt' ? 12.8 : r.cls === 'cobble' ? 12.8 : 6.4, r.cls === 'cobble' ? 12.8 : 6.4), M[r.cls]);
+    if ((r.cls !== 'wood' || !BRIDGE[r.a]) && r.cls !== 'steel') {
       // berma de pedra entre a pista e o muro
-      add(strip(r.a, r.b, hw, edge, 0.01, 12.8, 6.4), M.dirt);
-      add(strip(r.a, r.b, -edge, -hw, 0.01, 12.8, 6.4), M.dirt);
+      add(strip(r.a, r.b, HWf, EDGEf, 0.01, 12.8, 6.4), M.verge);
+      add(strip(r.a, r.b, (k) => -EDGEf(k), (k) => -HWf(k), 0.01, 12.8, 6.4), M.verge);
     }
     // linhas laterais brancas (a estrada de terra nao tem)
-    if (r.cls === 'dirt') continue;
-    add(strip(r.a, r.b, hw - 1.3, hw - 0.8, 0.06, 1, 1, 2), M.paint, { receive: false });
-    add(strip(r.a, r.b, -hw + 0.8, -hw + 1.3, 0.06, 1, 1, 2), M.paint, { receive: false });
+    if (r.cls === 'dirt' || r.cls === 'steel') continue;
+    add(strip(r.a, r.b, (k) => HWf(k) - 1.3, (k) => HWf(k) - 0.8, 0.06, 1, 1, 2), M.paint, { receive: false });
+    add(strip(r.a, r.b, (k) => -HWf(k) + 0.8, (k) => -HWf(k) + 1.3, 0.06, 1, 1, 2), M.paint, { receive: false });
   }
   // tracejado central (so asfalto/terra)
   {
@@ -155,18 +171,25 @@ export function buildWorld(track, quality = 'high', opts = {}) {
     mm.name = 'dashes';
   }
 
-  // taludes/fachada laterais onde a pista fica acima do chao
+  // taludes/fachada laterais onde a pista fica acima do chao (terra, ponte de aco ou carreta)
   {
-    const build = (bridgeOnly) => {
+    const build = (pred, bottomOf) => {
       const pos = [], idx = [];
-      let base = 0, open = false;
+      let open = false, lastK = -1;
+      const capAt = (k) => {
+        // tampa da ponta abrupta (labio do salto): fecha o corte transversal
+        if (ELEV[k] < 0.5) return;
+        const b = pos.length / 3;
+        const o = EDGEf(k), y0 = ELEV[k] + 0.02, yb = bottomOf(k);
+        for (const sg of [1, -1]) pos.push(X[k] + NX[k] * o * sg, y0, Z[k] + NZ[k] * o * sg, X[k] + NX[k] * o * sg, yb, Z[k] + NZ[k] * o * sg);
+        idx.push(b, b + 1, b + 3, b, b + 3, b + 2);
+      };
       for (let i = 0; i <= N; i++) {
         const k = i % N;
-        const isB = BRIDGE[k] === 1;
-        const ok = ELEV[k] >= 0.02 && isB === bridgeOnly;
-        if (!ok) { open = false; continue; }
+        const ok = ELEV[k] >= 0.02 && pred(k);
+        if (!ok) { if (open && lastK >= 0) capAt(lastK); open = false; continue; }
         for (const sg of [1, -1]) {
-          const o = edge * sg, bottom = isB ? -1.3 : 0;
+          const o = EDGEf(k) * sg, bottom = bottomOf(k);
           pos.push(X[k] + NX[k] * o, ELEV[k] + 0.02, Z[k] + NZ[k] * o, X[k] + NX[k] * o, bottom, Z[k] + NZ[k] * o);
         }
         const n4 = pos.length / 3;
@@ -176,6 +199,7 @@ export function buildWorld(track, quality = 'high', opts = {}) {
           idx.push(a + 2, a + 3, a + 6, a + 3, a + 7, a + 6); // lado -
         }
         open = true;
+        lastK = k;
       }
       if (!pos.length) return null;
       const g = new THREE.BufferGeometry();
@@ -187,9 +211,46 @@ export function buildWorld(track, quality = 'high', opts = {}) {
       g.computeVertexNormals();
       return g;
     };
-    const gd = build(false), gb = build(true);
-    if (gd) add(gd, skirtDirt);
+    const gd = build((k) => !BRIDGE[k] && !HSK[k], (k) => 0);
+    const gv = build((k) => HSK[k] === 2, (k) => Math.max(0, ELEV[k] - 1.4));
+    const gb = build((k) => BRIDGE[k] === 1, () => -1.3);
+    const gt = build((k) => HSK[k] === 1, () => 0.4);
+    if (gd) add(gd, city ? new THREE.MeshStandardMaterial({ map: TX.concreteTexture(), roughness: 0.9, side: THREE.DoubleSide }) : skirtDirt);
+    if (gv) add(gv, new THREE.MeshStandardMaterial({ map: TX.concreteTexture(), roughness: 0.9, side: THREE.DoubleSide }));
     if (gb) add(gb, new THREE.MeshStandardMaterial({ map: TX.steelTexture(), roughness: 0.5, metalness: 0.4, side: THREE.DoubleSide }));
+    if (gt) add(gt, new THREE.MeshStandardMaterial({ map: TX.steelTexture(), color: 0xff9a3c, roughness: 0.5, metalness: 0.35, side: THREE.DoubleSide }), { cast: true });
+  }
+
+  // piso das zonas abertas (praca, beco, lote ao lado da pista): calcada no lado sem muro
+  for (const z of track.def.openZones || []) {
+    const w = z.floor ?? 24;
+    if (!w) continue;
+    const a = Math.floor(z.from * N);
+    let b = Math.ceil(z.to * N);
+    if (z.to < z.from) b += N;
+    for (const sg of z.side === 0 || z.side === undefined ? [-1, 1] : [z.side]) {
+      add(strip(a, b, (k) => sg * EDGEf(k), (k) => sg * (EDGEf(k) + w), 0.008, 12.8, 6.4), M.verge);
+    }
+  }
+  // rodas das carretas (colinas com skin 'truck'): eixos duplos sob a plataforma, nos dois lados
+  {
+    const wm = [];
+    const Ltot = track.length;
+    for (const h of track.def.hills || []) {
+      if (h.skin !== 'truck') continue;
+      const a = h.from * Ltot, flat = ((((h.to - h.from) % 1) + 1) % 1) * Ltot;
+      const spots = flat > 6 ? [0.18, 0.5, 0.82].map((f) => a + flat * f) : [a - 3, a - 8]; // carreta sem plataforma plana: rodas sob a ponta da rampa
+      for (const s0 of spots) for (const dd of [-0.9, 0.9]) {
+        const p = track.pointAt(s0 + dd);
+        const yaw = Math.atan2(p.tz, p.tx), k = p.idx;
+        if (track.elevAt(s0 + dd) < 2.7) continue;
+        for (const sg of [-1, 1]) wm.push(matrix(p.x + p.nx * sg * (EDGEf(k) - 0.7), 1.3, p.z + p.nz * sg * (EDGEf(k) - 0.7), yaw, 1, 1, 1));
+      }
+    }
+    if (wm.length) {
+      const wg = new THREE.CylinderGeometry(1.3, 1.3, 1.1, 14).rotateX(Math.PI / 2);
+      group.add(instanced(wg, new THREE.MeshStandardMaterial({ color: 0x15161b, roughness: 0.9 }), wm));
+    }
   }
 
   // ------------------------------------------------------------ rio e terreno
@@ -215,8 +276,8 @@ export function buildWorld(track, quality = 'high', opts = {}) {
         if (run.length > 1) {
           const pick = run.filter((_, j) => j % 3 === 0 || j === run.length - 1);
           const pts = [];
-          for (const k of pick) pts.push([X[k] + NX[k] * sg * (edge + 0.3), Z[k] + NZ[k] * sg * (edge + 0.3)]);
-          for (const k of pick.slice().reverse()) pts.push([X[k] + NX[k] * sg * (edge + track.CHW[k]), Z[k] + NZ[k] * sg * (edge + track.CHW[k])]);
+          for (const k of pick) pts.push([X[k] + NX[k] * sg * (EDGEf(k) + 0.3), Z[k] + NZ[k] * sg * (EDGEf(k) + 0.3)]);
+          for (const k of pick.slice().reverse()) pts.push([X[k] + NX[k] * sg * (EDGEf(k) + track.CHW[k]), Z[k] + NZ[k] * sg * (EDGEf(k) + track.CHW[k])]);
           chasmPolys.push(pts);
         }
         run = [];
@@ -242,7 +303,7 @@ export function buildWorld(track, quality = 'high', opts = {}) {
     // centro e tamanho da area
     let x0 = 1e9, x1 = -1e9, z0 = 1e9, z1 = -1e9;
     for (let i = 0; i < N; i++) { x0 = Math.min(x0, X[i]); x1 = Math.max(x1, X[i]); z0 = Math.min(z0, Z[i]); z1 = Math.max(z1, Z[i]); }
-    const cx = (x0 + x1) / 2, cz = (z0 + z1) / 2, R = 1400;
+    const cx = (x0 + x1) / 2, cz = (z0 + z1) / 2, R = GROUND_R;
     const shape = new THREE.Shape();
     shape.moveTo(cx - R, -(cz - R)); shape.lineTo(cx + R, -(cz - R)); shape.lineTo(cx + R, -(cz + R)); shape.lineTo(cx - R, -(cz + R)); shape.closePath();
     for (const pts of poly) {
@@ -260,7 +321,7 @@ export function buildWorld(track, quality = 'high', opts = {}) {
     }
     const gg = new THREE.ShapeGeometry(shape);
     gg.rotateX(-Math.PI / 2);
-    const grassT = TX.grassTexture();
+    const grassT = city ? TX.cityGroundTexture() : TX.grassTexture();
     grassT.repeat.set(1 / 9, 1 / 9);
     const uv = gg.getAttribute('uv'), p = gg.getAttribute('position');
     for (let i = 0; i < uv.count; i++) uv.setXY(i, p.getX(i), p.getZ(i));
@@ -324,15 +385,32 @@ export function buildWorld(track, quality = 'high', opts = {}) {
     }
   }
   if (!poly.length && !chasmPolys.length) {
-    const gg = new THREE.PlaneGeometry(2800, 2800).rotateX(-Math.PI / 2);
-    const grassT = TX.grassTexture();
-    grassT.repeat.set(2800 / 9, 2800 / 9);
+    const gg = new THREE.PlaneGeometry(GROUND_R * 2, GROUND_R * 2).translate((bx0 + bx1) / 2, (bz0 + bz1) / 2, 0).rotateX(-Math.PI / 2);
+    const grassT = city ? TX.cityGroundTexture() : TX.grassTexture();
+    grassT.repeat.set(GROUND_R * 2 / 9, GROUND_R * 2 / 9);
     const ground = new THREE.Mesh(gg, new THREE.MeshStandardMaterial({ map: grassT, roughness: 1 }));
     ground.position.y = -0.02;
     ground.receiveShadow = true;
     group.add(ground);
   }
 
+  // pilares do viaduto (colinas com skin 'viaduct')
+  {
+    const pil = [], beams = [];
+    const stepP = Math.round(18 / ds);
+    for (let k = 0; k < N; k += stepP) {
+      if (HSK[k] !== 2 || ELEV[k] < 2.2) continue;
+      const yaw = Math.atan2(TZs[k], TXs[k]);
+      const h = ELEV[k] - 1.2;
+      for (const sg of [-1, 1]) pil.push(matrix(X[k] + NX[k] * sg * (HWf(k) * 0.6), h / 2, Z[k] + NZ[k] * sg * (HWf(k) * 0.6), yaw, 2.2, h, 2.2));
+      beams.push(matrix(X[k], ELEV[k] - 1.8, Z[k], yaw, 2.0, 1.0, EDGEf(k) * 2));
+    }
+    if (pil.length) {
+      const cm = new THREE.MeshStandardMaterial({ map: TX.concreteTexture(), roughness: 0.9 });
+      group.add(instanced(new THREE.BoxGeometry(1, 1, 1), cm, pil));
+      group.add(instanced(new THREE.BoxGeometry(1, 1, 1), cm, beams));
+    }
+  }
   // ------------------------------------------------------------ pilares da ponte
   {
     const pil = [], beams = [];
@@ -342,10 +420,10 @@ export function buildWorld(track, quality = 'high', opts = {}) {
         const yaw = Math.atan2(TZs[k], TXs[k]);
         const h = ELEV[k] + 2.4;
         for (const sg of [-1, 1]) {
-          const o = sg * (hw * 0.62);
+          const o = sg * (HWf(k) * 0.62);
           pil.push(matrix(X[k] + NX[k] * o, ELEV[k] - h / 2 + 0.1, Z[k] + NZ[k] * o, yaw, 1.8, h, 1.8));
         }
-        beams.push(matrix(X[k], ELEV[k] - 1, Z[k], yaw, 1.6, 1.4, edge * 2));
+        beams.push(matrix(X[k], ELEV[k] - 1, Z[k], yaw, 1.6, 1.4, EDGEf(k) * 2));
       }
     }
     if (pil.length) {
@@ -357,7 +435,7 @@ export function buildWorld(track, quality = 'high', opts = {}) {
   // ------------------------------------------------------------ muros por trecho
   {
     const posts = [], rails = [], diags = [];
-    const lposts = [], lrails = [], pickets = [];
+    const lposts = [], lrails = [], pickets = [], jersey = [];
     const H = 6.2, seg = Math.round(6 / ds);
     // sem cerca na beira do precipicio: nem no trecho, nem nos ~12 u antes/depois dele
     const nearChasm = (k, sg) => {
@@ -368,13 +446,15 @@ export function buildWorld(track, quality = 'high', opts = {}) {
     for (const r of runs) {
       const isBridge = !!BRIDGE[r.a];
       for (const sg of [-1, 1]) {
-        const o = (edge + 0.45) * sg;
         let flip = 1;
         for (let i = r.a; i < r.b; i += seg) {
           const j = Math.min(i + seg, r.b);
           const k0 = i % N, k1 = j % N;
+          if (track.OPEN[k0] & (sg > 0 ? 2 : 1)) continue; // zona aberta: sem muro
+          const o = (EDGEf(k0) + 0.45) * sg, o1 = (EDGEf(k1) + 0.45) * sg;
+          const wst = track.wallStyle(k0);
           const x0 = X[k0] + NX[k0] * o, z0 = Z[k0] + NZ[k0] * o, y0 = ELEV[k0];
-          const x1 = X[k1] + NX[k1] * o, z1 = Z[k1] + NZ[k1] * o, y1 = ELEV[k1];
+          const x1 = X[k1] + NX[k1] * o1, z1 = Z[k1] + NZ[k1] * o1, y1 = ELEV[k1];
           const dx = x1 - x0, dz = z1 - z0, len = Math.hypot(dx, dz) || 1;
           const yaw = Math.atan2(dz, dx);
           if (isBridge) {
@@ -384,7 +464,9 @@ export function buildWorld(track, quality = 'high', opts = {}) {
             const dl = Math.hypot(len, H - 0.5);
             diags.push(matrix((x0 + x1) / 2, y0 + H / 2 + 0.25, (z0 + z1) / 2, yaw, dl, 0.5, 0.5, flip * Math.atan2(H - 0.5, len)));
             flip = -flip;
-          } else if (track.RAILS[k0] && !nearChasm(k0, sg)) {
+          } else if (wst === 'jersey') {
+            jersey.push(matrix((x0 + x1) / 2, y0 + 0.55, (z0 + z1) / 2, yaw, len + 0.1, 1.1, 0.7));
+          } else if (wst === 'fence' && track.RAILS[k0] && !nearChasm(k0, sg)) {
             const bk = { x: (x0 + x1) / 2, z: (z0 + z1) / 2, y: y0, kind: 'iron', broken: false, parts: [['lposts', lposts.length], ['lrails', lrails.length], ['lrails', lrails.length + 1]] };
             lposts.push(matrix(x0, y0 + 1.8, z0, yaw, 0.38, 3.6, 0.38));
             lrails.push(matrix((x0 + x1) / 2, y0 + 3.0, (z0 + z1) / 2, yaw, len, 0.16, 0.16));
@@ -405,6 +487,7 @@ export function buildWorld(track, quality = 'high', opts = {}) {
       group.add(instanced(box, M.steel, rails));
       group.add(instanced(box, M.steel, diags));
     }
+    if (jersey.length) group.add(instanced(box, new THREE.MeshStandardMaterial({ map: TX.concreteTexture(), roughness: 0.9 }), jersey));
     if (lposts.length) {
       group.add((meshes.lposts = instanced(box, M.iron, lposts)));
       group.add((meshes.lrails = instanced(box, M.iron, lrails)));
@@ -418,8 +501,8 @@ export function buildWorld(track, quality = 'high', opts = {}) {
     const p0 = track.pointAt(0);
     const ang = Math.atan2(p0.tz, p0.tx);
     const y0 = track.elevAt(0);
-    const cols = 2, rows = Math.round((hw * 2) / 1.6);
-    const line = new THREE.Mesh(new THREE.PlaneGeometry(3.2, hw * 2).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ map: TX.checkerTexture(cols, rows) }));
+    const cols = 2, rows = Math.round((HWf(0) * 2) / 1.6);
+    const line = new THREE.Mesh(new THREE.PlaneGeometry(3.2, HWf(0) * 2).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ map: TX.checkerTexture(cols, rows) }));
     line.position.set(p0.x, y0 + 0.07, p0.z);
     line.rotation.y = -ang;
     group.add(line);
@@ -430,7 +513,7 @@ export function buildWorld(track, quality = 'high', opts = {}) {
       const sl = gridSlot(i);
       const pr = -4 - sl.back;
       const p = track.pointAt(pr);
-      const d = sl.side * hw * 0.36;
+      const d = sl.side * HWf(0) * 0.36;
       const cx = p.x + p.nx * d, cz = p.z + p.nz * d, y = track.elevAt(pr) + 0.09;
       const yaw = Math.atan2(p.tz, p.tx);
       const bar = (lx, lz, sx, sz) => {
@@ -445,7 +528,7 @@ export function buildWorld(track, quality = 'high', opts = {}) {
     }
     group.add(instanced(new THREE.BoxGeometry(1, 1, 1), M.paint, slots, { cast: false, receive: false }));
 
-    gantry = buildStartGantry(edge + 2.5);
+    gantry = buildStartGantry(EDGEf(0) + 2.5);
     const pg = track.pointAt(9);
     gantry.group.position.set(pg.x, track.elevAt(9), pg.z);
     gantry.group.rotation.y = -Math.atan2(pg.tz, pg.tx);
@@ -453,9 +536,12 @@ export function buildWorld(track, quality = 'high', opts = {}) {
   }
 
   // ------------------------------------------------------------ cenario
-  addScenery(group, track, { rng, low, bridgeRuns, W, edge, breakables, meshes, fast, decor });
+  addScenery(group, track, { rng, low, bridgeRuns, W, edge: maxHW + vg, breakables, meshes, fast, decor, city });
 
-  if (!fast) {
+  if (!fast && city) buildCity(track, { group, decor, rng, low, EDGEf });
+  if (!fast) buildStructures(track, decor, { low });
+  const propsView = !fast && track.scenery?.props?.length ? new PropsView(track, decor, { low }) : null;
+  if (!fast && !city) {
   // montanhas rochosas laranja ao fundo
   {
     let cx = 0, cz = 0;
@@ -525,7 +611,11 @@ export function buildWorld(track, quality = 'high', opts = {}) {
       return broke;
     },
     /** Arvore/pedra destruida por um poder: some do cenario. */
+    props: propsView,
+    /** Bomba de combustivel explodiu: troca pelo modelo queimado. */
+    burnPump(idx) { propsView?.burn(idx); },
     hideScenery(kind, idx) {
+      if (PROPS[kind]) { propsView?.hide(idx); return; }
       const s = meshes.scn;
       if (!s) return;
       if (kind === 'tree') { s.crown.setMatrixAt(idx, ZERO); s.trunk.setMatrixAt(idx, ZERO); s.crown.instanceMatrix.needsUpdate = s.trunk.instanceMatrix.needsUpdate = true; }
@@ -541,6 +631,7 @@ export function buildWorld(track, quality = 'high', opts = {}) {
     },
     /** Nova rodada: tudo volta ao lugar (arvores, pedras, cores). Cercas quebradas continuam quebradas. */
     restoreScenery() {
+      propsView?.restore();
       const s = meshes.scn;
       if (!s) return;
       s.tree.forEach((o, i) => { s.crown.setMatrixAt(i, o.m); s.trunk.setMatrixAt(i, o.m); s.crown.setColorAt(i, o.c); });
@@ -554,6 +645,7 @@ export function buildWorld(track, quality = 'high', opts = {}) {
     /** Anima a agua e quebra cercas atravessadas por carros. Retorna os trechos quebrados ({x,z,y,kind,dx,dz,speed}). */
     update(t, cars = []) {
       waterTex.offset.set(t * 0.015, t * 0.01);
+      propsView?.update(t);
       const broke = [];
       for (const c of cars) {
         if (!(c.alive || c.state === 'wreck') || c.speed < 4) continue;
@@ -579,7 +671,7 @@ export function buildWorld(track, quality = 'high', opts = {}) {
 }
 
 // ---------------------------------------------------------------- decoracao
-function addScenery(group, track, { rng, low, bridgeRuns, W, edge, breakables, meshes, fast, decor }) {
+function addScenery(group, track, { rng, low, bridgeRuns, W, edge, breakables, meshes, fast, decor, city }) {
   const sc0 = track.scenery;
   const { N, X, Z, NX, NZ, ELEV, BRIDGE } = track;
   // hash espacial das amostras da pista para medir distancia
@@ -623,7 +715,7 @@ function addScenery(group, track, { rng, low, bridgeRuns, W, edge, breakables, m
   const f = low ? 0.4 : 1;
   const tint = new THREE.Color();
 
-  if (!fast) {
+  if (!fast && !city) {
   // arvores redondas (copa dupla + tronco) e pinheiros
   const trunkG = colored(new THREE.CylinderGeometry(0.85, 1.25, 6, 7).translate(0, 3, 0), 0x7a4e2b);
   const crownG = mergeGeometries([
@@ -719,7 +811,7 @@ function addScenery(group, track, { rng, low, bridgeRuns, W, edge, breakables, m
   }
 
   // cercas brancas dos dois lados (so em terra)
-  {
+  if (!city) {
     const posts = [], railsA = [], railsB = [];
     const step = Math.round(2.2 / track.ds) || 2;
     for (const sg of [-1, 1]) {
@@ -745,7 +837,7 @@ function addScenery(group, track, { rng, low, bridgeRuns, W, edge, breakables, m
   }
 
   // casinhas (tijolo ou parede branca), com janela
-  if (!fast) {
+  if (!fast && !city) {
     const houses = sc0.houses;
     const bodyG = new THREE.BoxGeometry(11, 7, 9).translate(0, 3.5, 0);
     const roofG = new THREE.ConeGeometry(9, 5, 4).rotateY(Math.PI / 4).translate(0, 9.5, 0);

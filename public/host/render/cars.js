@@ -67,7 +67,7 @@ export class Actors {
       glow.scale.setScalar(5.5);
       g.add(m, glow);
       this.root.add(g);
-      this.boxes.push({ g, m, y: game.track.elevAt(b.s) });
+      this.boxes.push({ g, m, y: game.track.elevAt(b.s) + (b.h || 0) });
     }
   }
 

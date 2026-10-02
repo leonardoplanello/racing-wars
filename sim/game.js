@@ -3,7 +3,7 @@ import { makeCar, placeCar, stepCar, updateProgress, collideCars, startFall, imp
 import { qmat, makeWheel, stepWheel, WHEEL } from './body.js';
 import { ChaseCamera } from './camera.js';
 import { Items } from './items.js';
-import { buildScenery } from './scenery.js';
+import { buildScenery, PUMP } from './scenery.js';
 import { makeRng } from './rng.js';
 
 const BOXCG = 1.1; // altura do centro de massa do carro (sim/body.js BOX.cg)
@@ -82,8 +82,8 @@ export class Game {
   /** Quao perto da explosao por sair da pista (1 = explode). So vale onde o terreno e aberto. */
   offroadRatio(car) {
     const t = this.track;
-    if (!car.near || !t.def.openLand || t.hardWall(car.near.idx)) return 0;
-    const out = Math.abs(car.near.d) - (t.halfWidth + t.verge);
+    if (!car.near || t.hardWall(car.near.idx, car.near.d)) return 0;
+    const out = Math.abs(car.near.d) - t.edgeAt(car.near.idx);
     return Math.max(0, out) / CAR.offroadMax;
   }
 
@@ -173,6 +173,25 @@ export class Game {
   }
 
   /** Explode o carro (mina, missil, camera, longe da pista): elimina e deixa a carcaca. */
+  /** Bombas de combustivel acesas: ao fim do pavio explodem (matam no raio, acendem as vizinhas) e queimam ate o fim da partida. */
+  updatePumps(dt) {
+    const sc = this.track.scenery;
+    if (!sc || !sc.pumps.length) return;
+    for (const p of sc.pumps) {
+      if (!p.lit || p.burnt) continue;
+      p.fuse -= dt;
+      if (p.fuse > 0) continue;
+      p.burnt = true; p.lit = false; p.dead = true;
+      for (const c of p.cols) c.dead = true;
+      this.events.push({ type: 'pumpBoom', idx: p.idx, x: p.x, y: p.y, z: p.z });
+      this.items.blastWorld(this, p.x, p.z, PUMP.chain, 'pump'); // derruba cenario leve e acende as bombas vizinhas
+      for (const c of this.cars) {
+        if (!c.alive || c.state === 'falling' || Math.abs(c.y - p.y) > 5) continue;
+        if (Math.hypot(c.x - p.x, c.z - p.z) < PUMP.radius + 1) this.explodeCar(c, 'pump', -1, p.x, p.z);
+      }
+    }
+  }
+
   explodeCar(car, cause, by = -1, ex = car.x, ez = car.z) {
     if (!car.alive || car.state === 'falling' || car.god) return;
     this.events.push({ type: 'explode', kind: cause, x: car.x, z: car.z, owner: by, car: car.id });
@@ -263,7 +282,7 @@ export class Game {
       hit = true;
     }
     if (nr) {
-      if (tr.hardWall(nr.idx)) {
+      if (tr.hardWall(nr.idx, nr.d)) {
         const maxD = tr.hwAt(nr.idx) + tr.verge - rw, ad = Math.abs(nr.d);
         if (ad > maxD) {
           const sg = nr.d > 0 ? 1 : -1, nx = nr.nx * sg, nz = nr.nz * sg;
@@ -353,6 +372,7 @@ export class Game {
       for (let j = i + 1; j < live.length; j++) collideCars(live[i], live[j], this.events);
     }
     this.items.update(dt, this);
+    this.updatePumps(dt);
 
     this.frameCamera();
     // corte pelo enquadramento da camera
@@ -369,7 +389,7 @@ export class Game {
     // fim de partida por voltas
     let leader = null;
     for (const c of this.cars) if (c.alive && (!leader || c.progress > leader.progress)) leader = c;
-    if (leader && leader.progress >= this.track.length * RULES.laps) {
+    if (leader && leader.progress >= this.track.length * (this.track.def.laps ?? RULES.laps)) {
       return this.endMatch('laps', leader.id);
     }
     // fim de rodada: so avaliado em RACING (evita falso vencedor no respawn)

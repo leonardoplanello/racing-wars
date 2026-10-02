@@ -7,9 +7,10 @@ import { CAR, HULL } from '/sim/car.js';
 import { makeBrain, think, DIFFICULTY_LABEL, DIFFICULTY_ORDER } from '/sim/ai.js';
 import { makeRng } from '/sim/rng.js';
 import testCircuit from '/sim/tracks/testcircuit.js';
+import downtown from '/sim/tracks/downtown.js';
 import { HostNet } from './net.js';
 import { UI, qrSvg } from './ui.js';
-import { GameAudio } from './audio.js';
+import { GameAudio } from './audio.js?v=2';
 import { Keyboard } from './kbd.js';
 import { createScene } from './render/scene.js';
 import { buildWorld } from './render/world.js';
@@ -29,7 +30,7 @@ const CUPS = [
 ];
 const TRACKS = [
   { id: 'test', icon: '🧪', name: 'Ponte do Rio (teste)', desc: 'Circuito de teste (~1,5 min por volta): ponte sobre o rio, rampas de salto, curvas fechadas e uma area alta sem grades.', def: testCircuit },
-  { icon: '🏙️', name: 'Downtown', desc: 'Em breve.', locked: true },
+  { id: 'downtown', icon: '🏙️', name: 'Downtown', desc: 'Metrópole ao entardecer (~4 min por volta): quarteirões técnicos, posto de gasolina que explode, carretas-rampa e salto do viaduto para a rodovia.', def: downtown },
   { icon: '🌊', name: 'Water Hill', desc: 'Em breve.', locked: true },
   { icon: '🏜️', name: 'Death Mountain', desc: 'Em breve.', locked: true },
   { icon: '🌽', name: 'Farm Jump', desc: 'Em breve.', locked: true },
@@ -38,6 +39,13 @@ const TRACKS = [
 const ui = new UI();
 const audio = new GameAudio();
 const kbd = new Keyboard();
+
+for (const [id, kind, on, off] of [['mute-music', 'music', '🎵', '🔇'], ['mute-sfx', 'sfx', '🔊', '🔈']]) {
+  const b = document.getElementById(id);
+  const sync = () => { const m = audio.mute[kind]; b.classList.toggle('off', m); b.textContent = m ? off : on; b.setAttribute('aria-pressed', m); };
+  b.addEventListener('click', () => { audio.setMuted(kind, !audio.mute[kind]); sync(); b.blur(); });
+  sync();
+}
 const sc = createScene(document.getElementById('gl'), quality);
 const fx = new FX(sc.scene);
 const actors = new Actors(sc.scene, { shadows: sc.shadows });
@@ -63,7 +71,8 @@ const S = {
   kbd: null, // color
   masterId: -1,
   cupIdx: 1,
-  trackIdx: 0,
+  geysers: [],
+  trackIdx: Math.max(0, TRACKS.findIndex((t) => t.id === qs.get('track'))),
   ips: [],
   ipIdx: 0,
   port: location.port || 80,
@@ -290,12 +299,14 @@ function startGame() {
   const cup = CUPS[S.cupIdx].id;
   const game = new Game(list, { track, cup, seed: (Math.random() * 1e9) | 0, aspect: sc.size.aspect });
   S.game = game;
+  S.geysers = [];
   S.paused = false;
   S.names = new Map(list.map((p) => [p.id, p.name]));
   S.kinds = new Map(list.map((p) => [p.id, p.kind]));
   const rng = makeRng(game.rng() * 1e9);
   S.brains = new Map(list.filter((p) => p.isBot).map((p) => [p.id, makeBrain(rng, null, S.difficulty)]));
   if (world) sc.scene.remove(world.group);
+  sc.applyTheme(track.theme);
   world = buildWorld(track, quality);
   sc.scene.add(world.group);
   actors.setup(game);
@@ -403,6 +414,23 @@ function handleEvents(events) {
         fx.leaves(e.x, e.z, 1.2, e.kind === 'rock', gnd(e.x, e.z));
         break;
       }
+      case 'propHit': {
+        world?.hideScenery(e.kind, e.idx);
+        const sp = Math.hypot(e.vx, e.vz) || 1, g0 = gnd(e.x, e.z);
+        const col = { cone: 0xff6a1a, sign: 0xd3221f, hydrant: 0xd8392b, busstop: 0x9bd8ff }[e.kind] ?? 0xcccccc;
+        for (let i = 0; i < (e.kind === 'busstop' ? 9 : 4); i++) debris.piece({ x: e.x + (Math.random() - 0.5), y: g0 + 0.6 + Math.random(), z: e.z + (Math.random() - 0.5), vx: (e.vx / sp) * (6 + Math.random() * 8) + (Math.random() - 0.5) * 5, vy: 4 + Math.random() * 5, vz: (e.vz / sp) * (6 + Math.random() * 8) + (Math.random() - 0.5) * 5, sx: 0.3 + Math.random() * 0.4, sy: 0.3 + Math.random() * 0.4, sz: 0.3 + Math.random() * 0.4, color: col, gy: g0 });
+        if (e.kind === 'hydrant') S.geysers.push({ x: e.x, z: e.z, t: 3.2 });
+        break;
+      }
+      case 'pumpBoom': {
+        world?.burnPump(e.idx);
+        fx.explosion(e.x, e.z, 1.5, e.y);
+        fx.flash(e.x, e.z, 1.6, e.y + 2, 0xffa040);
+        fx.scorch(e.x, e.z, 6, e.y + 0.06);
+        audio.play('explode', 2);
+        cam.shake = Math.max(cam.shake, 3.4);
+        break;
+      }
       case 'sceneryFreeze': world?.freezeScenery(e.kind, e.idx); break;
       case 'sceneryReset': world?.restoreScenery(); break;
       case 'iceBurst': fx.frost(e.x, e.z, e.y, e.radius); audio.play('iceBurst'); cam.shake = Math.max(cam.shake, 0.6); break;
@@ -440,7 +468,7 @@ function handleEvents(events) {
       case 'alarm': audio.play('alarm'); vib(e.car, [70, 40, 70]); break;
       case 'fall': if (e.cause !== 'chasm') fx.splash(e.x, e.z); audio.play('fall'); break;
       case 'dead': {
-        const why = { fall: 'caiu no rio', chasm: 'caiu no precipício', cut: 'ficou para trás', mine: 'pisou numa mina', missile: 'levou um míssil', trail: 'passou no rastro do nitro', offroad: 'se perdeu no mato' }[e.cause] || 'explodiu';
+        const why = { fall: 'caiu no rio', chasm: 'caiu no precipício', cut: 'ficou para trás', mine: 'pisou numa mina', missile: 'levou um míssil', trail: 'passou no rastro do nitro', offroad: 'se perdeu no mato', pump: 'explodiu no posto' }[e.cause] || 'explodiu';
         ui.killfeed(`${nameOf(e.car)} ${why}`, hexOf(e.car));
         if (e.cause === 'cut') audio.play('cut');
         vib(e.car, [400]);
@@ -589,6 +617,18 @@ function ambient(g, dt) {
     if (c.state === 'stun' && Math.random() < dt * 40) fx.smoke(c.x, c.z, 1, c.y);
     if (c.state === 'stun' && c.stun > 0.3 && Math.random() < dt * 30) fx.arcs(c.x, c.z, 2, c.y);
   }
+  // bombas queimadas: fogo e fumaca ate o fim da partida; hidrantes quebrados soltam agua
+  const pumps = g.track.scenery?.pumps;
+  if (pumps) for (const p of pumps) if (p.burnt) {
+    if (Math.random() < dt * 22) fx.fire(p.x + (Math.random() - 0.5) * 0.8, p.z + (Math.random() - 0.5) * 0.8, 0, 0, p.y + 0.8);
+    if (Math.random() < dt * 7) fx.smoke(p.x, p.z, 1.6, p.y + 2);
+  }
+  for (let i = S.geysers.length - 1; i >= 0; i--) {
+    const gz = S.geysers[i];
+    gz.t -= dt;
+    if (gz.t <= 0) { S.geysers.splice(i, 1); continue; }
+    if (Math.random() < dt * 50) fx.splash(gz.x + (Math.random() - 0.5) * 0.6, gz.z + (Math.random() - 0.5) * 0.6);
+  }
   audio.setEngine(vmax, g.state === 'RACING');
   audio.setSqueal(g.state === 'RACING' ? Math.min(1, Math.max(0, slip - 3) / 8) : 0);
 }
@@ -598,4 +638,6 @@ ui.splash();
 window.__rw = S; // depuracao
 window.__dbg = dbg;
 window.__ed = editor;
+window.__start = startGame;
+if (qs.has('autostart')) setTimeout(() => startGame(), 300); // atalho de teste
 S.tick = (dt = 1 / 60, n = 1) => { for (let i = 0; i < n; i++) tick(dt, performance.now()); };

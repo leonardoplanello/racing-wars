@@ -14,4 +14,5 @@ Jogo web: host (tela principal) + celulares como controle. UI em português (pt-
 - Ao mudar regras, atualize `docs/REGRAS.md` e os testes em `test/`.
 - Editor de mapa dedicado em `/editor/` (`public/editor/`); salva em localStorage e o jogo usa com `?debug`.
 - Debug: `?debug` ou F3; F4 abre o editor (valores ao vivo, pista, seleção de área para pedir edições); V congela.
-- `node tools/dyn.js` inspeciona a dinâmica do carro; `node tools/balance.js [bots] [copa]` simula partidas só com bots.
+- `node tools/dyn.js` inspeciona a dinâmica do carro; `node tools/balance.js [bots] [copa] [pista]` simula partidas só com bots (pista: `test` ou `downtown`).
+- Atalho de teste: `/?debug&track=downtown&autostart` abre a partida direto; `/editor/?track=downtown` edita a pista.

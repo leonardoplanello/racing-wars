@@ -92,6 +92,11 @@ export class Items {
     const pattern = dens === 2
       ? [[-0.62, 0], [0.62, 0], [0, 4.5], [-0.34, 9], [0.34, 9]]
       : [[-0.5, 0], [0.5, 0], [0, 5]];
+    // caixas avulsas (`def.boxes`: {x, z, h?} em coordenadas do mundo; h = altura extra: so quem esta no ar pega)
+    for (const bx of this.track.def.boxes || []) {
+      const nr = this.track.nearest(bx.x, bx.z, -1, this.track.newNear());
+      this.boxes.push({ x: bx.x, z: bx.z, active: true, timer: 0, s: nr.s, h: bx.h ?? 0, gy: bx.h ? this.track.elevAt(nr.s) : 0, fixed: true });
+    }
     groups.forEach((frac, gi) => {
       if (dens === 1 && gi % 2 === 1) return;
       const s = frac * this.track.length;
@@ -128,6 +133,7 @@ export class Items {
       }
       for (const c of cars) {
         if (!c.alive || c.state === 'falling' || c.item) continue;
+        if (b.h && (!c.air || Math.abs(c.y - (b.gy + b.h)) > 3)) continue; // caixa suspensa: so no ar, na altura do salto
         const dx = c.x - b.x, dz = c.z - b.z;
         if (dx * dx + dz * dz < POWER.boxRadius * POWER.boxRadius) {
           c.item = this.randomItem();
@@ -189,7 +195,7 @@ export class Items {
       }
       if (!boom) {
         m.near = this.track.nearest(m.x, m.z, m.near ? m.near.idx : -1, m.near || this.track.newNear());
-        if (Math.abs(m.near.d) > this.track.halfWidth + this.track.verge) boom = true;
+        if (Math.abs(m.near.d) > this.track.edgeAt(m.near.idx)) boom = true;
       }
       if (boom) {
         this.explode(game, m.x, m.z, 'missile', 3.2, m.owner, hit);

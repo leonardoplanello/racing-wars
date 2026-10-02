@@ -4,6 +4,7 @@
 // Convencoes: x para a direita, z para baixo; rumo h: frente = (cos h, sin h); h crescente = virar a direita;
 // direita do carro = (-sin h, cos h); velocidade lateral v > 0 = deslizando para a direita; w = dh/dt.
 import { SURF_MU, SURF_SPEED } from './track.js';
+import { PUMP } from './scenery.js';
 import { orient, tumbleStep, tiltOf, qmat, BOX, BOX_WRECK } from './body.js';
 
 export const DT = 1 / 120;
@@ -321,7 +322,7 @@ function verticalStep(car, track, dt, events, px, pz) {
 /** Inclinacao do chao ao longo do rumo do carro (so no tabuleiro). */
 function groundPitch(car, track) {
   const near = car.near;
-  if (Math.abs(near.d) > track.halfWidth + track.verge) return 0;
+  if (Math.abs(near.d) > track.edgeAt(near.idx)) return 0;
   return Math.atan(track.slopeAt(near.s) * (near.tx * Math.cos(car.h) + near.tz * Math.sin(car.h)));
 }
 
@@ -462,7 +463,7 @@ function wallContact(car, track, i, hw, events) {
   const { x: cx, z: cz } = hullPos(car, i, HP);
   const nc = car.nearC[i];
   track.nearest(cx, cz, nc.idx >= 0 ? nc.idx : car.near.idx, nc);
-  if (!track.hardWall(nc.idx)) return; // terra aberta: da para sair da estrada
+  if (!track.hardWall(nc.idx, nc.d)) return; // terra aberta / zona aberta: da para sair da estrada
   const maxD = track.hwAt(nc.idx) + track.verge - R;
   const ad = Math.abs(nc.d);
   if (ad <= maxD) return;
@@ -484,11 +485,22 @@ export function sceneryContact(car, scenery, events) {
   for (let i = 0; i < HULL.length; i++) {
     const { x: cx, z: cz } = hullPos(car, i, HP);
     for (const o of list) {
-      if (car.y > (o.top ?? 99)) continue; // por cima do obstaculo (rampa/plateau)
+      if (o.dead || car.y > (o.top ?? 99)) continue; // por cima do obstaculo (rampa/plateau)
       const dx = o.x - cx, dz = o.z - cz;
       const rr = R + o.r;
       const d2 = dx * dx + dz * dz;
       if (d2 >= rr * rr || d2 < 1e-9) continue;
+      const beh = o.beh;
+      if (beh && beh.knock) {
+        // cone, placa, hidrante, ponto de onibus: nao seguram o carro, quebram/tombam e tiram um pouco de velocidade
+        o.ref.dead = true;
+        for (const cc of o.ref.cols) cc.dead = true;
+        const k = 1 - beh.soft;
+        car.vx *= k; car.vz *= k;
+        if (events) events.push({ type: 'propHit', kind: o.kind, idx: o.idx, x: o.ref.x, z: o.ref.z, vx: car.vx, vz: car.vz, car: car.id });
+        continue;
+      }
+      if (beh && beh.explosive && !o.ref.burnt && car.speed > PUMP.minSpeed) scenery.ignite(o.ref, PUMP.first);
       const d = Math.sqrt(d2);
       const nx = dx / d, nz = dz / d; // do carro para o obstaculo
       const pen = rr - d;

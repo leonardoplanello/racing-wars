@@ -80,6 +80,10 @@ h2 { margin: 0; font-size: 34px; }
 .table tr.first td { color: var(--accent); font-size: 30px; }
 .table .dot { display: inline-block; width: 18px; height: 18px; border-radius: 50%; background: var(--c); margin-right: 10px; vertical-align: -2px; }
 .delta.up { color: #4dff88; } .delta.down { color: #ff6b6b; }
+#mutes { position: fixed; bottom: calc(8px + var(--safe-t, 0px)); left: 8px; display: flex; gap: 6px; z-index: 50; }
+#mutes button { width: 40px; height: 40px; border-radius: 10px; border: 0; background: #000a; color: #fff; font-size: 20px; cursor: pointer; }
+#mutes button:hover { background: #000d; }
+#mutes button.off { opacity: .55; }
 #debug { position: fixed; bottom: 6px; right: 8px; font: 12px Consolas, monospace; background: #000a; padding: 4px 8px; border-radius: 6px; white-space: pre; }
 
 /* semaforo da largada (estilo do original) */

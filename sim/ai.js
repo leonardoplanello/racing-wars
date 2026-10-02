@@ -51,10 +51,12 @@ export function makeBrain(rng, skill = null, level = 'medium') {
 const buf = [];
 const LANE_OFFS = [-0.4, -0.2, 0, 0.2, 0.4];
 
+const near0idx = (car) => (car.near ? car.near.idx : 0);
+
 /** Retorna { steer, fire } para o bot. */
 export function think(brain, car, game, dt) {
   const track = game.track, d = brain.d, skill = brain.skill;
-  const near = car.near, hw = track.halfWidth;
+  const near = car.near, hw = track.hwAt(near0idx(car)); 
   brain.wobbleT += dt;
   if (car.freeze > 0 || (car.state !== 'run' && car.state !== 'grid')) { brain.steerCmd = 0; return { steer: 0, fire: false }; }
   const racing = game.state === 'RACING';

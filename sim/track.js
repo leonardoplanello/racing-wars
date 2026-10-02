@@ -91,6 +91,7 @@ export function buildTrack(def, spacing = 1) {
   }
   // colinas/rampas: subida suave de `rise` unidades, topo plano e descida suave (`fall`) ou labio abrupto (fall = 0)
   const RAILS = new Uint8Array(N).fill(1);
+  const HSKIN = new Uint8Array(N); // 1 = a colina e uma carreta (visual: chassi de aco, rodas)
   const smooth = (t) => t * t * (3 - 2 * t);
   const Ltot = N * ds;
   for (const h of def.hills || []) {
@@ -106,6 +107,8 @@ export function buildTrack(def, spacing = 1) {
       else k = fall > 0 ? 1 - smooth((u - rise - flat) / fall) : 0;
       ELEV[i] = Math.max(ELEV[i], h.height * k);
       if (h.rails === false) RAILS[i] = 0;
+      if (h.skin === 'truck' && k > 0.02) HSKIN[i] = 1;
+      if (h.skin === 'viaduct' && k > 0.02) HSKIN[i] = 2;
     }
   }
   // precipicios: fosso fundo ao lado da pista (side: 1 direita, -1 esquerda, 0 os dois); sem cerca desse lado
@@ -116,16 +119,39 @@ export function buildTrack(def, spacing = 1) {
   }
   const halfWidth = def.halfWidth ?? 10;
   const HW = new Float64Array(N).fill(halfWidth);
+  // larguras por trecho (`widths`: {from,to,hw,blend}): transicao suave de `blend` unidades nas pontas
+  for (const w of def.widths || []) {
+    const blend = w.blend ?? 50;
+    const a = w.from * Ltot, flat = ((((w.to - w.from) % 1) + 1) % 1) * Ltot;
+    for (let i = 0; i < N; i++) {
+      const u = ((((i * ds - a) % Ltot) + Ltot) % Ltot);
+      const dd = u <= flat ? 0 : Math.min(u - flat, Ltot - u);
+      const k = 1 - smooth(Math.min(1, dd / blend));
+      if (k > 0) HW[i] += (w.hw - HW[i]) * k;
+    }
+  }
+  // zonas abertas (`openZones`: {from,to,side}): sem muro nesse lado (praca, beco, brecha do guard-rail)
+  const OPEN = new Uint8Array(N);
+  for (const z of def.openZones || []) {
+    const bit = z.side === 0 || z.side === undefined ? 3 : z.side === 1 ? 2 : 1;
+    mark(z.from, z.to, (i) => { OPEN[i] |= bit; });
+  }
+  // estilo do muro por trecho (`walls`: {from,to,style}); padrao `wallStyle` da pista
+  const WALLS = ['fence', 'building', 'jersey', 'none'];
+  const WALL = new Uint8Array(N).fill(Math.max(0, WALLS.indexOf(def.wallStyle || 'fence')));
+  for (const w of def.walls || []) mark(w.from, w.to, (i) => { WALL[i] = Math.max(0, WALLS.indexOf(w.style)); });
 
   const track = {
     def, name: def.name, N, ds, length: N * ds,
-    X, Z, TX, TZ, NX, NZ, SURFACE, HW, BRIDGE, ELEV, RAILS, CH, CHW,
+    X, Z, TX, TZ, NX, NZ, SURFACE, HW, BRIDGE, ELEV, RAILS, CH, CHW, OPEN, WALL, HSKIN,
     halfWidth, verge: def.verge ?? 0, boundary: def.boundary || 'wall',
     theme: def.theme || {},
     newNear: () => ({ idx: -1, s: 0, d: 0, nx: 0, nz: 1, tx: 1, tz: 0, cx: 0, cz: 0, dist: 0 }),
     wrapS(s) { const L = this.length; return ((s % L) + L) % L; },
     idxAt(s) { return Math.floor(this.wrapS(s) / ds) % N; },
     hwAt(i) { return HW[i]; },
+    /** Borda da faixa (largura + berma) no indice i. */
+    edgeAt(i) { return HW[i] + this.verge; },
     /** Ponto da linha central em s (posicao + tangente). */
     pointAt(s, out = { x: 0, z: 0, tx: 1, tz: 0, nx: 0, nz: 1, idx: 0 }) {
       const w = this.wrapS(s);
@@ -196,7 +222,7 @@ export function buildTrack(def, spacing = 1) {
     },
     /** Igual a groundAt, mas a partir de um `near` ja calculado. */
     groundFromNear(nr, out) {
-      if (Math.abs(nr.d) <= this.halfWidth + this.verge) {
+      if (Math.abs(nr.d) <= HW[nr.idx] + this.verge) {
         out.y = this.elevAt(nr.s);
         const e = this.slopeAt(nr.s);
         const l = Math.hypot(e, 1);
@@ -213,7 +239,7 @@ export function buildTrack(def, spacing = 1) {
     cliffAt(x, z, y, R, hint, out) {
       const nr = this._cn || (this._cn = this.newNear());
       this.nearest(x, z, hint ?? -1, nr);
-      const lim = this.halfWidth + this.verge + R, ad = Math.abs(nr.d);
+      const lim = HW[nr.idx] + this.verge + R, ad = Math.abs(nr.d);
       if (ad >= lim || ELEV[nr.idx] - y <= 0.7) return false;
       const sg = nr.d >= 0 ? 1 : -1;
       out.pen = lim - ad; out.nx = -sg * nr.nx; out.nz = -sg * nr.nz;
@@ -225,7 +251,7 @@ export function buildTrack(def, spacing = 1) {
       if (!c) return false;
       const side = near.d > 0 ? 1 : -1;
       if (c !== 2 && c !== side) return false;
-      const a = Math.abs(near.d), edge = this.halfWidth + this.verge;
+      const a = Math.abs(near.d), edge = HW[near.idx] + this.verge;
       return a > edge + 0.3 && a < edge + CHW[near.idx];
     },
     hasChasm: CH.some((v) => v !== 0),
@@ -236,13 +262,23 @@ export function buildTrack(def, spacing = 1) {
     },
     /** A pista tem trechos acima do chao (rampas, plateau, ponte)? */
     hasElev: ELEV.some((v) => v > 0.05),
-    wallStyle(i) { return BRIDGE[i] ? 'truss' : 'fence'; },
-    /** Muro solido neste trecho? Em pistas com `openLand`, so a ponte tem muro; em terra da para sair. */
-    hardWall(i) { return def.openLand ? BRIDGE[i] === 1 : true; },
+    wallStyle(i) { return BRIDGE[i] ? 'truss' : WALLS[WALL[i]]; },
+    /**
+     * Muro solido neste ponto? Em pistas com `openLand`, so a ponte tem muro; em terra da para sair.
+     * Nas `openZones` o lado aberto (d>=0 direita) nao tem muro.
+     */
+    hardWall(i, d = 0) {
+      if (def.openLand) return BRIDGE[i] === 1;
+      const o = OPEN[i];
+      if (!o) return true;
+      return !(o & (d >= 0 ? 2 : 1));
+    },
+    /** A pista tem `openZones`? */
+    hasOpen: OPEN.some((v) => v !== 0),
     riverHalf: def.riverHalf ?? 34,
     /** O ponto (dado seu `near`) esta dentro do rio ao lado da ponte? */
     inWater(near) {
-      return def.openLand && BRIDGE[near.idx] === 1 && Math.abs(near.d) > this.halfWidth + this.verge + 0.5 && Math.abs(near.d) < (def.riverHalf ?? 34);
+      return def.openLand && BRIDGE[near.idx] === 1 && Math.abs(near.d) > HW[near.idx] + this.verge + 0.5 && Math.abs(near.d) < (def.riverHalf ?? 34);
     },
     /** Menor raio de curvatura (unidades) — usado nos testes. */
     minRadius() {

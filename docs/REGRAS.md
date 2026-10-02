@@ -73,7 +73,26 @@ Caixotes de madeira com símbolo azul brilhante (grupos de 5 na War Cup e de 3 n
 ## Pistas
 Itens: nitro, mina, míssil, magnético e gelo (sorteio uniforme entre os cinco).
 
-Por enquanto só a pista de teste **Ponte do Rio** (~1,5 min por volta): ponte de madeira com vigas de aço sobre o rio, estrada de terra com sulcos entre cercas de ferro, um zigue-zague de **curvas fechadas** na praça de paralelepípedo, **2 rampas de salto** uma **área alta (plateau) sem guardrails** de onde é possível cair e um **precipício** ao lado da pista (fosso fundo, sem cerca, na parte externa da curva grande do leste): sem cercas na beira. Quem cai **não morre na hora**: despenca (visível) e é eliminado ao **sair do enquadramento** da câmera (ou após `RULES.chasmFallMax` = 3 s). Planejadas: Downtown, Water Hill, Death Mountain, Farm Jump (~5 min por volta).
+Pistas disponíveis: **Ponte do Rio** (teste) e **Downtown**. Planejadas: Water Hill, Death Mountain, Farm Jump.
+
+### Ponte do Rio (teste)
+~1,5 min por volta: ponte de madeira com vigas de aço sobre o rio, estrada de terra com sulcos entre cercas de ferro, um zigue-zague de **curvas fechadas** na praça de paralelepípedo, **2 rampas de salto** uma **área alta (plateau) sem guardrails** de onde é possível cair e um **precipício** ao lado da pista (fosso fundo, sem cerca, na parte externa da curva grande do leste): sem cercas na beira. Quem cai **não morre na hora**: despenca (visível) e é eliminado ao **sair do enquadramento** da câmera (ou após `RULES.chasmFallMax` = 3 s).
+
+### Downtown (~4 min por volta, ~7,6 mil u)
+Metrópole ao entardecer: fachadas dos dois lados são o **muro sólido** da pista (nada de terra aberta), postes acesos, semáforos que trocam de cor, placas de pare, hidrantes, pontos de ônibus e placas de neon. Sete trechos, nesta ordem:
+1. **Avenida Central** (largada): reta larga de 4 faixas.
+2. **Quarteirões**: curvas de 90° em zigue-zague, chicane de cones na obra.
+3. **Posto de gasolina** (esquina larga, lado de dentro aberto): ilha de bombas sob uma cobertura, com um **canal estreito** (~4 u) no meio e **uma caixa** dentro. Atalho opcional que corta a esquina.
+4. **Bairro antigo**: paralelepípedo, largura 10, curvas fechadas.
+5. **Pátio das cegonhas**: a **primeira carreta é a rampa** de salto e a segunda é o pouso; **uma caixa flutua** entre elas (só pega quem está no ar). Quem prefere seguro sai pelo **lote ao lado** (lado aberto, com caixotes).
+6. **Viaduto**: sobe ~300 u até 7 u de altura (deck de concreto com muros tipo jersey) e termina em **lábio abrupto**: o salto é obrigatório e o carro cai na rodovia (a continuação da pista, no chão). Perto do lábio o guard-rail está **quebrado** do lado esquerdo, com cones afunilando; quem é empurrado ali cai ao lado da pista. Pouso com queda vertical > `CAR.crashSpeed` capota.
+7. **Rodovia e retorno**: reta rápida de 3 faixas com pórtico de sinalização, saída curva e volta à avenida.
+
+**Atalhos opcionais** (lado de dentro de uma esquina sem muro, `openZones`): **A** praça com fonte e caixotes; **B** beco de ~8 u entre dois prédios (com caixa); **C** canteiro de obras ao lado do trecho dos cones (com caixa). Cortam caminho, mas têm obstáculos sólidos; longe demais da pista (`CAR.offroadMax`) o carro explode.
+
+**Props**: **poste** e **semáforo** são sólidos (poderes derrubam); **cone, placa de pare, hidrante e ponto de ônibus** não seguram o carro: quebram ao toque e tiram um pouco da velocidade (`PROPS.<tipo>.soft`), voltando na rodada seguinte (o hidrante solta um jato de água). **Bomba de combustível**: bater (acima de `PUMP.minSpeed` = 4 u/s), ou um míssil/mina/Whomp perto, a **explode** (`sim/scenery.js › PUMP`): **só quem está no raio de `PUMP.radius` (9 u) morre**, as bombas vizinhas (`PUMP.chain`, 7 u) explodem em cadeia com `PUMP.fuse` (0,16 s) de atraso, e o **fogo e a fumaça ficam até o fim da partida** (as bombas queimadas não voltam entre rodadas; se a rodada acaba no meio da cadeia, as bombas acesas queimam de vez).
+
+A **volta de Downtown pode ser de 3 voltas (~12 min)**; a pista aceita `laps` próprio (`def.laps`) para encurtar.
 
 ## Efeitos
 - Cercas (brancas e de ferro) **se estilhaçam** com física: tábuas e postes voam na direção do carro, quicam e somem; árvores soltam folhas e pedras soltam lascas.
@@ -96,4 +115,5 @@ Página dedicada em **`/editor/`** (no Pages: `editor/`). Mostra a pista real em
 - **Pontos da pista**: arraste para mover, ＋ insere no trecho clicado, － remove (mín. 4). Aviso se a curva for fechada demais.
 - **Rampas/colinas, precipícios, pontes e materiais do piso** (asfalto, madeira, terra, paralelepípedo): listas com início/fim (sliders, destacados na pista), altura, subida, descida (0 = lábio), grades, lado e largura.
 - **Objetos à mão** (`def.objects`: árvore, pedra, casa) e **grupos de caixas de item** (`def.boxGroups`), além da quantidade de cenário aleatório.
+- Abra uma pista específica com **`/editor/?track=downtown`**.
 - **Salvar** grava em `localStorage` (`rw-debug-track:<id>`, a mesma chave do F4); **Testar no jogo** abre o jogo com `?debug`, que usa a pista salva. Exportar/Importar JSON.

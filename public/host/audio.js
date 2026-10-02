@@ -5,6 +5,20 @@ export class GameAudio {
     this.musicOn = false;
     this.step = 0;
     this.nextT = 0;
+    this.mute = { music: false, sfx: false };
+    try { Object.assign(this.mute, JSON.parse(localStorage.getItem('rw-mute') || '{}')); } catch {}
+  }
+
+  setMuted(kind, on) {
+    this.mute[kind] = !!on;
+    try { localStorage.setItem('rw-mute', JSON.stringify(this.mute)); } catch {}
+    this.applyMute();
+  }
+
+  applyMute() {
+    if (!this.ctx) return;
+    this.music.gain.value = this.mute.music ? 0 : 0.16;
+    this.sfx.gain.value = this.mute.sfx ? 0 : 0.7;
   }
 
   init() {
@@ -42,6 +56,7 @@ export class GameAudio {
     this.dist.curve = curve;
     this.gtrF = ctx.createBiquadFilter(); this.gtrF.type = 'lowpass'; this.gtrF.frequency.value = 2600;
     this.dist.connect(this.gtrF); this.gtrF.connect(this.music);
+    this.applyMute();
     this.timer = setInterval(() => this.tick(), 25);
   }
 
@@ -84,7 +99,7 @@ export class GameAudio {
     // bateria
     if (i === 0 || i === 4) this.kick(t);
     if (i === 2 || i === 6) this.snare(t);
-    this.hat(t, i % 2 ? 0.4 : 0.8);
+    // this.hat(t, i % 2 ? 0.4 : 0.8);
   }
   guitar(f, t, dur, vol) {
     const ctx = this.ctx;

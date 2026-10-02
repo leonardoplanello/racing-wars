@@ -19,7 +19,8 @@ export function createScene(canvas, quality = 'high') {
   scene.background = skyTexture();
   scene.fog = new THREE.Fog(0xcfeaff, 190, 820);
 
-  scene.add(new THREE.HemisphereLight(0xcfe8ff, 0x6b8a4a, 1.15));
+  const hemi = new THREE.HemisphereLight(0xcfe8ff, 0x6b8a4a, 1.15);
+  scene.add(hemi);
   const sun = new THREE.DirectionalLight(0xfff1d0, 2.6);
   sun.position.set(-50, 90, 35);
   if (shadows) {
@@ -32,6 +33,7 @@ export function createScene(canvas, quality = 'high') {
   }
   scene.add(sun, sun.target);
 
+  const sunOff = { x: -45, y: 90, z: 30 };
   const camera = new THREE.PerspectiveCamera(CAMERA.fov, 16 / 9, 0.5, 1400);
   const size = { w: 1, h: 1, aspect: 16 / 9 };
   const shakeV = { x: 0, y: 0, z: 0 };
@@ -62,7 +64,7 @@ export function createScene(canvas, quality = 'high') {
     camera.updateMatrixWorld();
     // sombra e luz seguem o pelotao
     sun.target.position.set(cam.ax, cam.ay, cam.az);
-    sun.position.set(cam.ax - 45, cam.ay + 90, cam.az + 30);
+    sun.position.set(cam.ax + sunOff.x, cam.ay + sunOff.y, cam.az + sunOff.z);
     sun.target.updateMatrixWorld();
   }
 
@@ -76,5 +78,18 @@ export function createScene(canvas, quality = 'high') {
     return out;
   }
 
-  return { THREE, renderer, scene, camera, sun, size, resize, frame, toScreen, render: () => renderer.render(scene, camera), quality, shadows };
+  /** Ceu, nevoa e luzes da pista (theme.sky/fog/hemi/sun/exposure); sem tema volta ao dia padrao. */
+  function applyTheme(theme = {}) {
+    const sk = theme.sky;
+    scene.background = sk ? skyTexture(sk[0], sk[1], sk[2]) : skyTexture();
+    const f = theme.fog || [0xcfeaff, 190, 820];
+    if (scene.fog) { scene.fog.color.set(f[0]); scene.fog.near = f[1]; scene.fog.far = f[2]; }
+    const h = theme.hemi || [0xcfe8ff, 0x6b8a4a, 1.15];
+    hemi.color.set(h[0]); hemi.groundColor.set(h[1]); hemi.intensity = h[2];
+    const s = theme.sun || [0xfff1d0, 2.6, -45, 90, 30];
+    sun.color.set(s[0]); sun.intensity = s[1]; sunOff.x = s[2]; sunOff.y = s[3]; sunOff.z = s[4];
+    renderer.toneMappingExposure = theme.exposure ?? 1.05;
+  }
+
+  return { THREE, renderer, scene, camera, sun, size, resize, frame, applyTheme, toScreen, render: () => renderer.render(scene, camera), quality, shadows };
 }

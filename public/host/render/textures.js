@@ -365,3 +365,89 @@ export function iceTexture() {
   for (let i = 0; i < 30; i++) { g.beginPath(); g.arc(rng() * 256, rng() * 256, 0.8 + rng() * 2.2, 0, 6.283); g.fill(); }
   return toTex(c);
 }
+
+// ---------------------------------------------------------------- cidade (Downtown)
+/** Calcada de concreto com juntas. */
+export function sidewalkTexture() {
+  const rng = makeRng(21);
+  const [c, g] = canvas(128, 128);
+  g.fillStyle = '#9a9ea6'; g.fillRect(0, 0, 128, 128);
+  for (let i = 0; i < 700; i++) {
+    const v = 120 + rng() * 60;
+    g.fillStyle = `rgba(${v},${v},${v + 4},${0.15 + rng() * 0.2})`;
+    g.fillRect(rng() * 128, rng() * 128, 1 + rng() * 2, 1 + rng() * 2);
+  }
+  g.strokeStyle = 'rgba(40,44,52,.55)'; g.lineWidth = 2;
+  for (const p of [0, 64]) { g.beginPath(); g.moveTo(p, 0); g.lineTo(p, 128); g.stroke(); g.beginPath(); g.moveTo(0, p); g.lineTo(128, p); g.stroke(); }
+  return toTex(c);
+}
+
+/** Concreto liso (barreiras, muros). */
+export function concreteTexture() {
+  const rng = makeRng(22);
+  const [c, g] = canvas(128, 128);
+  g.fillStyle = '#b4b6b8'; g.fillRect(0, 0, 128, 128);
+  for (let i = 0; i < 900; i++) {
+    const v = 140 + rng() * 70;
+    g.fillStyle = `rgba(${v},${v},${v},${0.12 + rng() * 0.2})`;
+    g.fillRect(rng() * 128, rng() * 128, 1 + rng() * 3, 1 + rng() * 2);
+  }
+  return toTex(c);
+}
+
+/** Chao da cidade fora das ruas: asfalto escuro de quarteirao. */
+export function cityGroundTexture() {
+  const rng = makeRng(23);
+  const [c, g] = canvas(256, 256);
+  g.fillStyle = '#5a5e66'; g.fillRect(0, 0, 256, 256);
+  for (let i = 0; i < 1800; i++) {
+    const v = 70 + rng() * 50;
+    g.fillStyle = `rgba(${v},${v},${v + 6},${0.2 + rng() * 0.3})`;
+    g.fillRect(rng() * 256, rng() * 256, 1 + rng() * 2, 1 + rng() * 2);
+  }
+  return toTex(c);
+}
+
+/** Fachada de predio: andares com janelas (acesas ao acaso). `tone` = cor-base. */
+export function facadeTexture(tone = '#6b7280', seed = 31) {
+  const rng = makeRng(seed);
+  const [c, g] = canvas(128, 256);
+  g.fillStyle = tone; g.fillRect(0, 0, 128, 256);
+  for (let r = 0; r < 16; r++) {
+    for (let col = 0; col < 6; col++) {
+      const lit = rng() < 0.42;
+      g.fillStyle = lit ? (rng() < 0.5 ? '#ffe08a' : '#fff3c4') : '#1f2a3a';
+      g.fillRect(col * 21 + 4, r * 16 + 3, 13, 10);
+    }
+  }
+  g.fillStyle = 'rgba(0,0,0,.18)';
+  for (let r = 0; r < 16; r++) g.fillRect(0, r * 16 + 14, 128, 2);
+  return toTex(c);
+}
+
+/** Placa de neon: texto brilhante sobre fundo escuro (para material emissivo). */
+export function neonTexture(text, color = '#ff3df2') {
+  const [c, g] = canvas(256, 96);
+  g.fillStyle = '#0b0b14'; g.fillRect(0, 0, 256, 96);
+  g.font = 'bold 54px sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
+  g.shadowColor = color; g.shadowBlur = 22; g.fillStyle = color;
+  g.fillText(text, 128, 50);
+  g.shadowBlur = 8; g.fillStyle = '#ffffff';
+  g.fillText(text, 128, 50);
+  g.strokeStyle = color; g.lineWidth = 5; g.shadowBlur = 14; g.strokeRect(6, 6, 244, 84);
+  return toTex(c, { repeat: false });
+}
+
+/** Placa de PARE: octogono vermelho com texto. */
+export function stopSignTexture() {
+  const [c, g] = canvas(128, 128);
+  g.clearRect(0, 0, 128, 128);
+  g.fillStyle = '#d3221f';
+  g.beginPath();
+  for (let i = 0; i < 8; i++) { const a = Math.PI / 8 + (i * Math.PI) / 4; g.lineTo(64 + Math.cos(a) * 62, 64 + Math.sin(a) * 62); }
+  g.closePath(); g.fill();
+  g.strokeStyle = '#fff'; g.lineWidth = 5; g.stroke();
+  g.fillStyle = '#fff'; g.font = 'bold 36px sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
+  g.fillText('PARE', 64, 66);
+  return toTex(c, { repeat: false });
+}
