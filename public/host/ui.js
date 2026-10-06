@@ -65,6 +65,7 @@ export class UI {
           <div class="hint">Bots: <b>${o.bots}</b> &nbsp; <button class="btn" style="font-size:16px;padding:6px 16px" data-nav="left">−</button> <button class="btn" style="font-size:16px;padding:6px 16px" data-nav="right">+</button>
             &nbsp; Teclado (<b>K</b>): <b>${o.kbd ? 'ligado' : 'desligado'}</b></div>
           <div class="hint">Dificuldade dos bots (<b>G</b> ou ▲▼): <button class="btn" style="font-size:16px;padding:6px 16px" data-nav="up">${o.difficulty} ▸</button></div>
+          <div class="hint">Câmera (<b>C</b>): <button class="btn" style="font-size:16px;padding:6px 16px" data-nav="cam">${o.cam === 'split' ? '🎮 Tela dividida (kart) ▸' : '🎥 Estilo atual ▸'}</button></div>
           <button class="btn" data-nav="ok">ESCOLHER COPA ▶</button>
           <div class="hint">${o.masterName ? `<b>${esc(o.masterName)}</b> (Master) controla os menus pelo celular.` : 'Conecte um celular para ser o Master, ou use o teclado (Enter).'}</div>
         </div>
@@ -98,6 +99,7 @@ export class UI {
 
   // ---------- HUD ----------
   initHud(game, names) {
+    this.vpRoot = null; this.vpEls = null; this.vpKey = '';
     this.hud.innerHTML = '<div class="cards"></div><div class="lap"><b>LAP <span class="lapn">1/3</span></b><small class="info"></small></div><div class="kill"></div>';
     this.chips.clear();
     const top = this.hud.querySelector('.cards');
@@ -129,6 +131,8 @@ export class UI {
   }
 
   clearHud() {
+    this.vpRoot = null; this.vpEls = null; this.vpKey = '';
+    document.body.classList.remove('split');
     this.hud.innerHTML = '';
     this.labelsEl.innerHTML = '';
     this.chips.clear();
@@ -136,12 +140,17 @@ export class UI {
     this.dangerEls.clear();
   }
 
-  updateHud(game) {
-    // colocacao: vivos por progresso; mortos por ordem inversa de morte
+  /** Colocacao: vivos por progresso; mortos por ordem inversa de morte. */
+  order(game) {
     const alive = game.ranking().map((c) => c.id);
     const dead = game.deaths.slice().reverse().filter((id) => !alive.includes(id));
     const order = [...alive, ...dead];
     for (const c of game.cars) if (!order.includes(c.id)) order.push(c.id);
+    return order;
+  }
+
+  updateHud(game) {
+    const order = this.order(game);
     const ord = ['1st', '2nd', '3rd', '4th', '5th', '6th', '7th', '8th'];
     for (const c of game.cars) {
       const ch = this.chips.get(c.id);
@@ -190,6 +199,66 @@ export class UI {
         d.style.top = (q.behind ? H - m : Math.max(m, Math.min(H - m, q.y))) + 'px';
       } else d.style.display = 'none';
     }
+  }
+
+  /** Esconde os avisos de perigo da camera compartilhada (na tela dividida cada celula tem o seu). */
+  hideDanger() { for (const d of this.dangerEls.values()) d.style.display = 'none'; }
+
+  // ---------- tela dividida ----------
+  /**
+   * Monta/atualiza o HUD de cada celula. cells: [{ id, rect, warn }]; spare = retangulo livre (classificacao) ou null.
+   * Sem cells (modo normal) remove tudo e devolve o HUD de sempre.
+   */
+  splitHud(game, cells, spare, names) {
+    document.body.classList.toggle('split', !!cells);
+    const cardsEl = this.hud.querySelector('.cards');
+    if (cardsEl) {
+      if (cells && spare) Object.assign(cardsEl.style, { left: spare.x + 8 + 'px', top: spare.y + 8 + 'px', display: 'flex', maxHeight: spare.h - 16 + 'px' });
+      else if (cells) cardsEl.style.display = 'none';
+      else { cardsEl.style.left = cardsEl.style.top = cardsEl.style.maxHeight = ''; cardsEl.style.display = ''; }
+    }
+    if (!cells) { if (this.vpRoot) { this.vpRoot.remove(); this.vpRoot = null; this.vpEls = null; this.vpKey = ''; } return; }
+    const key = cells.map((c) => `${c.id}:${c.rect.x | 0},${c.rect.y | 0},${c.rect.w | 0},${c.rect.h | 0}`).join('|');
+    if (!this.vpRoot) { this.vpRoot = document.createElement('div'); this.vpRoot.id = 'vps'; this.hud.appendChild(this.vpRoot); }
+    if (key !== this.vpKey) {
+      this.vpKey = key;
+      this.vpRoot.innerHTML = '';
+      this.vpEls = new Map();
+      for (const c of cells) {
+        const car = game.carById(c.id);
+        const el = document.createElement('div');
+        el.className = 'vp';
+        el.style.cssText = `left:${c.rect.x}px;top:${c.rect.y}px;width:${c.rect.w}px;height:${c.rect.h}px;--c:${COLORS[car ? car.color : c.id].hex}`;
+        el.innerHTML = '<div class="vp-top"><span class="vp-name"></span><span class="vp-lap"></span></div><div class="vp-rank"></div><div class="vp-item"></div><div class="vp-pts"></div><div class="vp-warn">⚠ VOLTE PARA O PELOTÃO!</div>';
+        this.vpRoot.appendChild(el);
+        this.vpEls.set(c.id, { el, name: el.querySelector('.vp-name'), lap: el.querySelector('.vp-lap'), rank: el.querySelector('.vp-rank'), item: el.querySelector('.vp-item'), pts: el.querySelector('.vp-pts'), warn: el.querySelector('.vp-warn') });
+      }
+    }
+    const order = this.order(game);
+    const ord = ['1st', '2nd', '3rd', '4th', '5th', '6th', '7th', '8th'];
+    for (const c of cells) {
+      const e = this.vpEls.get(c.id), car = game.carById(c.id);
+      if (!e || !car) continue;
+      const nm = names.get(c.id) || 'Piloto';
+      if (e.name.textContent !== nm) e.name.textContent = nm;
+      e.lap.textContent = `LAP ${Math.min(game.lapOf(car), game.track.def.laps ?? 3)}/${game.track.def.laps ?? 3}`;
+      e.rank.textContent = car.alive ? ord[order.indexOf(c.id)] || '' : '✖';
+      e.rank.classList.toggle('dead', !car.alive);
+      const ic = car.alive && car.item ? car.item : '';
+      if (e.itemKind !== ic) { e.itemKind = ic; if (ic === 'mine') e.item.innerHTML = '<span class="mine-ico"></span>'; else e.item.textContent = ic ? ITEM_ICON[ic] : ''; e.item.classList.toggle('on', !!ic); }
+      const pts = game.points.get(c.id) ?? 0;
+      if (e.ptsV !== pts) { e.ptsV = pts; e.pts.textContent = '●'.repeat(pts) + '○'.repeat(Math.max(0, 10 - pts)); }
+      e.warn.style.display = c.warn ? 'block' : 'none';
+    }
+  }
+
+  /** Aviso curto no topo da tela (ex.: troca de camera). */
+  toast(text, ms = 1400) {
+    if (!this.toastEl) { this.toastEl = document.createElement('div'); this.toastEl.id = 'toast'; document.body.appendChild(this.toastEl); }
+    this.toastEl.textContent = text;
+    this.toastEl.classList.add('on');
+    clearTimeout(this.toastTimer);
+    this.toastTimer = setTimeout(() => this.toastEl.classList.remove('on'), ms);
   }
 
   // ---------- banner ----------

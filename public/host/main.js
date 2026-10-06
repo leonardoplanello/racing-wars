@@ -2,7 +2,8 @@
 import { COLORS, ITEM_LABEL, MAX_PLAYERS, BTN_FIRE, BTN_AWAY, BTN_REV } from '/shared/protocol.js';
 import { buildTrack } from '/sim/track.js';
 import { Game } from '/sim/game.js';
-import { CAMERA } from '/sim/camera.js';
+import { CAMERA, KartCamera, kartFovV } from '/sim/camera.js';
+import { splitRects } from '/shared/layout.js';
 import { CAR, HULL } from '/sim/car.js';
 import { makeBrain, think, DIFFICULTY_LABEL, DIFFICULTY_ORDER } from '/sim/ai.js';
 import { makeRng } from '/sim/rng.js';
@@ -14,6 +15,8 @@ import { GameAudio } from './audio.js?v=2';
 import { Keyboard } from './kbd.js';
 import { createScene } from './render/scene.js';
 import { buildWorld } from './render/world.js';
+import { buildMapWorld } from './render/mapworld.js';
+import { buildMapTrack } from '/sim/maptrack.js';
 import { Actors } from './render/cars.js';
 import { FX } from './render/fx.js';
 import { Debris } from './render/debris.js';
@@ -35,6 +38,21 @@ const TRACKS = [
   { icon: '🏜️', name: 'Death Mountain', desc: 'Em breve.', locked: true },
   { icon: '🌽', name: 'Farm Jump', desc: 'Em breve.', locked: true },
 ];
+
+// Pistas importadas do SRB2Kart (opcionais): tools/srb2kart/build.js gera public/tracks/srb2kart/index.json a partir do jogo instalado.
+const REMOTE_BASE = (document.baseURI.includes('/host/') ? '../' : '') + 'tracks/srb2kart/';
+async function loadRemoteTracks() {
+  try {
+    const r = await fetch(REMOTE_BASE + 'index.json');
+    if (!r.ok) return;
+    const idx = await r.json();
+    const list = idx.tracks.filter((t) => t.ok).map((t) => ({ id: t.id, icon: '🦔', name: t.name, desc: `${t.subtitle || 'SRB2Kart'} · ${t.laps} voltas · ~${Math.round(t.length / 34 / 60 * 10) / 10} min`, remote: REMOTE_BASE + t.file }));
+    TRACKS.splice(2, 0, ...list);
+    const want = qs.get('track');
+    if (want) { const i = TRACKS.findIndex((t) => t.id === want); if (i >= 0) S.trackIdx = i; }
+    if (S.phase === 'tracks') refresh();
+  } catch {}
+}
 
 const ui = new UI();
 const audio = new GameAudio();
@@ -82,7 +100,20 @@ const S = {
   paused: false,
   names: new Map(),
   resultsTimer: 0,
+  camMode: loadCamMode(), // 'classic' (camera compartilhada de sempre) | 'split' (tela dividida, camera de kart por jogador)
+  kcams: new Map(), // id -> KartCamera (so visual)
 };
+
+function loadCamMode() {
+  try { return localStorage.getItem('rw-camera-mode') === 'split' ? 'split' : 'classic'; } catch { return 'classic'; }
+}
+/** Alterna a camera (menu ou tecla C) e lembra a escolha. */
+function toggleCam() {
+  S.camMode = S.camMode === 'split' ? 'classic' : 'split';
+  try { localStorage.setItem('rw-camera-mode', S.camMode); } catch {}
+  ui.toast(S.camMode === 'split' ? '🎮 Câmera: tela dividida (kart)' : '🎥 Câmera: estilo atual');
+  if (S.phase === 'lobby') refresh();
+}
 
 // ---------------------------------------------------------------- jogadores
 const phoneName = (d) => d.name || `Jogador ${d.id + 1}`;
@@ -220,7 +251,7 @@ function refresh() {
     const m = S.devices.get(S.masterId);
     ui.lobby({
       qr: S.code ? qrSvg(p.url) : '', code: S.code || '····', padUrl: `${p.base}/pad`,
-      slots: slots(), bots: S.bots.size, difficulty: DIFFICULTY_LABEL[S.difficulty], kbd: S.kbd !== null, masterName: m ? phoneName(m) : '',
+      slots: slots(), bots: S.bots.size, difficulty: DIFFICULTY_LABEL[S.difficulty], kbd: S.kbd !== null, cam: S.camMode, masterName: m ? phoneName(m) : '',
       ips: S.ips.length, ipIdx: S.ipIdx,
     });
   } else if (S.phase === 'cups') ui.cups(CUPS, S.cupIdx);
@@ -251,6 +282,7 @@ function nav(k, idx, fromPhone = false) {
       if (k === 'right') { if (participants().length < MAX_PLAYERS) addBot(); refresh(); }
       else if (k === 'left') { removeBot(); refresh(); }
       else if (k === 'up' || k === 'down') cycleDifficulty(k === 'up' ? 1 : -1);
+      else if (k === 'cam') toggleCam();
       else if (k === 'ok') goto('cups');
       break;
     case 'cups':
@@ -287,15 +319,24 @@ kbd.onKey = (ch) => {
     else if (ch === 'g') cycleDifficulty(1);
     else if (ch === 'i') { S.ipIdx = (S.ipIdx + 1) % Math.max(1, S.ips.length); refresh(); }
   }
+  if (ch === 'c' && (S.phase === 'lobby' || S.phase === 'game')) toggleCam();
   if (S.phase === 'game' && ch === 'p') nav('back');
 };
 
 // ---------------------------------------------------------------- partida
-function startGame() {
+async function startGame() {
   if (participants().length < 2) while (participants().length < 4 && freeColor() >= 0) addBot();
   const list = participants();
-  const def = (dbg.on && editor.trackOverride(TRACKS[S.trackIdx].id)) || TRACKS[S.trackIdx].def; // debug: pista editada
-  const track = buildTrack(def);
+  const entry = TRACKS[S.trackIdx];
+  let track;
+  if (entry.remote) {
+    ui.banner('<div class="mid">Carregando pista…</div>');
+    try { track = buildMapTrack(await (await fetch(entry.remote)).json()); } catch (e) { ui.banner(`<div class="mid">Erro ao carregar a pista</div><div class="sub">${e.message}</div>`, 4000); return; }
+    ui.bannerClear();
+  } else {
+    const def = (dbg.on && editor.trackOverride(entry.id)) || entry.def; // debug: pista editada
+    track = buildTrack(def);
+  }
   const cup = CUPS[S.cupIdx].id;
   const game = new Game(list, { track, cup, seed: (Math.random() * 1e9) | 0, aspect: sc.size.aspect });
   S.game = game;
@@ -303,11 +344,12 @@ function startGame() {
   S.paused = false;
   S.names = new Map(list.map((p) => [p.id, p.name]));
   S.kinds = new Map(list.map((p) => [p.id, p.kind]));
+  S.kcams.clear();
   const rng = makeRng(game.rng() * 1e9);
   S.brains = new Map(list.filter((p) => p.isBot).map((p) => [p.id, makeBrain(rng, null, S.difficulty)]));
   if (world) sc.scene.remove(world.group);
   sc.applyTheme(track.theme);
-  world = buildWorld(track, quality);
+  world = track.map ? buildMapWorld(track, { base: REMOTE_BASE }) : buildWorld(track, quality);
   sc.scene.add(world.group);
   actors.setup(game);
   debris.clear();
@@ -519,6 +561,7 @@ function tick(dt, now) {
   fpsAcc += dt; fpsN++;
   if (fpsAcc > 0.5) { fps = Math.round(fpsN / fpsAcc); fpsAcc = 0; fpsN = 0; }
   const g = S.game;
+  let drawn = false; // a tela dividida ja desenhou este quadro
 
   if (g && S.phase !== 'splash') {
     if (S.phase === 'game' && !S.paused) {
@@ -562,6 +605,7 @@ function tick(dt, now) {
     }
     sc.frame(g.camera);
     dbg.applyCamera(dt);
+    const split = splitViews(g, S.paused ? 0 : dt * dbg.timeScale);
     dbg.updateHitboxes(g, HULL, CAR.circleR);
     actors.update(g, now / 1000, dt);
     if (world) {
@@ -572,16 +616,56 @@ function tick(dt, now) {
       }
     }
     ui.updateHud(g);
-    ui.updateLabels(g, (x, y, z) => sc.toScreen(x, y, z, scr), g.camera);
+    let fovV = CAMERA.fov, hFrac = 1;
+    if (split) {
+      ui.hideDanger();
+      const cells = split.views.map((v) => {
+        const c = g.carById(v.id);
+        return { id: v.id, rect: v.rect, warn: !!c && c.alive && g.state === 'RACING' && Math.max(g.camera.edgeRatio(c.x, c.z, c.y), g.offroadRatio(c)) > 0.72 };
+      });
+      ui.splitHud(g, cells, split.spare, S.names);
+      sc.setSunShadow(split.views.length < 5); // sombra do sol e re-renderizada em cada celula
+      fovV = split.views[0].fov; hFrac = split.views[0].rect.h / sc.size.h;
+    } else {
+      ui.splitHud(g, null, null, S.names);
+      sc.setSunShadow(true);
+      ui.updateLabels(g, (x, y, z) => sc.toScreen(x, y, z, scr), g.camera);
+    }
     debris.update(S.paused ? 0 : dt * dbg.timeScale);
-    fx.update(S.paused ? 0 : dt * dbg.timeScale, sc.renderer.domElement.height / (2 * Math.tan((CAMERA.fov * Math.PI) / 360)));
+    fx.update(S.paused ? 0 : dt * dbg.timeScale, (sc.renderer.domElement.height * hFrac) / (2 * Math.tan((fovV * Math.PI) / 360)));
+    if (split) { sc.renderViews(split.views); drawn = true; }
   }
-  sc.render();
+  if (!drawn) sc.render();
   if (dbg.on) {
     const rt = [...S.devices.values()].map((d) => `${d.id}:${d.rtt}ms${d.away ? '(away)' : ''}`).join(' ');
     dbg.text(fps, `fase ${S.phase}${g ? ' · ' + g.state + ' · rodada ' + g.round : ''}
 ${rt}`);
   }
+}
+
+/**
+ * Tela dividida: uma celula por jogador humano (celular/teclado), cada uma com a sua camera de kart seguindo o
+ * proprio carro (ou o lider, se ele morreu). So visual: as regras seguem a camera compartilhada. Devolve null
+ * no modo normal, com a freecam do debug, ou sem humanos.
+ */
+const kfwd = { x: 0, y: 0, z: 0 };
+function splitViews(g, dt) {
+  if (S.camMode !== 'split' || S.phase === 'results' || (dbg.on && dbg.free)) return null;
+  const humans = g.cars.filter((c) => S.kinds.get(c.id) !== 'bot').sort((a, b) => a.id - b.id);
+  if (!humans.length) return null;
+  const lay = splitRects(humans.length, sc.size.w, sc.size.h);
+  const lead = g.ranking()[0];
+  const views = humans.map((c, i) => {
+    const tgt = c.alive || !lead ? c : lead;
+    let kc = S.kcams.get(c.id);
+    if (!kc) S.kcams.set(c.id, (kc = new KartCamera()));
+    if (kc.target !== tgt.id) { kc.target = tgt.id; kc.ready = false; }
+    kc.update(dt, tgt, { top: CAR.cruise });
+    kc.forward(kfwd);
+    const rect = lay.rects[i];
+    return { id: c.id, rect, fov: kartFovV(rect.w / rect.h, humans.length), x: kc.x, y: kc.y, z: kc.z, fx: kfwd.x, fy: kfwd.y, fz: kfwd.z, sunAt: { x: tgt.x, y: tgt.y || 0, z: tgt.z } };
+  });
+  return { views, spare: lay.spare };
 }
 
 /** Acoes de debug pedidas pelo teclado (dar item, renascer, explodir bots). */
@@ -639,5 +723,5 @@ window.__rw = S; // depuracao
 window.__dbg = dbg;
 window.__ed = editor;
 window.__start = startGame;
-if (qs.has('autostart')) setTimeout(() => startGame(), 300); // atalho de teste
+loadRemoteTracks().then(() => { if (qs.has('autostart')) startGame(); }); // atalho de teste: /?debug&track=...&autostart
 S.tick = (dt = 1 / 60, n = 1) => { for (let i = 0; i < n; i++) tick(dt, performance.now()); };

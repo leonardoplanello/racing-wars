@@ -91,5 +91,57 @@ export function createScene(canvas, quality = 'high') {
     renderer.toneMappingExposure = theme.exposure ?? 1.05;
   }
 
-  return { THREE, renderer, scene, camera, sun, size, resize, frame, applyTheme, toScreen, render: () => renderer.render(scene, camera), quality, shadows };
+  // ---- tela dividida: uma camera Three por celula, desenhada com viewport + scissor
+  const viewCams = [];
+  const sunTarget = new THREE.Vector3();
+  const sunShadowOn = sun.castShadow;
+  const vq = new THREE.Vector3();
+
+  /** Liga/desliga a sombra do sol (com muitas celulas ela e re-renderizada em cada uma). */
+  function setSunShadow(on) { if (shadows) sun.castShadow = on && sunShadowOn; }
+
+  /**
+   * views: [{ rect:{x,y,w,h} (px CSS, origem no topo), fov (vertical), x,y,z (posicao), fx,fy,fz (frente),
+   *           sunAt:{x,y,z} (para onde a luz/sombra aponta) }]. Preenche view.cam com a camera Three usada.
+   */
+  function renderViews(views) {
+    const W = size.w, H = size.h;
+    renderer.setScissorTest(false);
+    renderer.setViewport(0, 0, W, H);
+    renderer.setClearColor(0x05070c, 1);
+    renderer.clear(); // divisorias e celulas livres
+    renderer.setScissorTest(true);
+    views.forEach((v, i) => {
+      const c = viewCams[i] || (viewCams[i] = new THREE.PerspectiveCamera(60, 1, 0.5, 1400));
+      const r = v.rect;
+      c.fov = v.fov; c.aspect = r.w / r.h; c.updateProjectionMatrix();
+      c.position.set(v.x, v.y, v.z);
+      c.lookAt(v.x + v.fx * 50, v.y + v.fy * 50, v.z + v.fz * 50);
+      c.updateMatrixWorld();
+      v.cam = c;
+      if (v.sunAt) {
+        sunTarget.set(v.sunAt.x, v.sunAt.y, v.sunAt.z);
+        sun.target.position.copy(sunTarget);
+        sun.position.set(sunTarget.x + sunOff.x, sunTarget.y + sunOff.y, sunTarget.z + sunOff.z);
+        sun.target.updateMatrixWorld();
+      }
+      const gy = H - r.y - r.h;
+      renderer.setViewport(r.x, gy, r.w, r.h);
+      renderer.setScissor(r.x, gy, r.w, r.h);
+      renderer.render(scene, c);
+    });
+    renderer.setScissorTest(false);
+    renderer.setViewport(0, 0, W, H);
+  }
+
+  /** Projeta um ponto do mundo para pixels da tela inteira usando a camera/celula de uma view ja desenhada. */
+  function toScreenView(view, x, y, z, out = { x: 0, y: 0, behind: false }) {
+    vq.set(x, y, z).project(view.cam);
+    out.x = view.rect.x + (vq.x * 0.5 + 0.5) * view.rect.w;
+    out.y = view.rect.y + (-vq.y * 0.5 + 0.5) * view.rect.h;
+    out.behind = vq.z > 1;
+    return out;
+  }
+
+  return { THREE, renderer, scene, camera, sun, size, resize, frame, applyTheme, toScreen, render: () => renderer.render(scene, camera), renderViews, toScreenView, setSunShadow, quality, shadows };
 }

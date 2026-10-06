@@ -1,10 +1,11 @@
 // Pista: spline fechada amostrada uniformemente. Coordenadas: x para a direita, z para baixo (tela).
 // Rumo h: frente = (cos h, sin h); aumentar h = virar para a direita. Normal "direita" = (-tz, tx).
 
-export const SURF = { ASPHALT: 0, WOOD: 1, DIRT: 2, STONE: 3 };
+// OFF1..OFF3 = fora de pista do SRB2Kart (forca 1-3: velocidade x0,5 / x0,33 / x0,25); ICE = gelo (so pistas de mapa)
+export const SURF = { ASPHALT: 0, WOOD: 1, DIRT: 2, STONE: 3, OFF1: 4, OFF2: 5, OFF3: 6, ICE: 7 };
 // coeficiente de atrito por superficie (escala a aderencia dos pneus) e fator da velocidade de cruzeiro
-export const SURF_MU = [1.0, 0.85, 0.85, 0.95];
-export const SURF_SPEED = [1, 0.98, 0.97, 1];
+export const SURF_MU = [1.0, 0.85, 0.85, 0.95, 0.7, 0.55, 0.45, 0.25];
+export const SURF_SPEED = [1, 0.98, 0.97, 1, 0.5, 0.34, 0.25, 1];
 
 function catmull(p0, p1, p2, p3, t) {
   const t2 = t * t;

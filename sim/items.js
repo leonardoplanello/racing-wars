@@ -95,7 +95,9 @@ export class Items {
     // caixas avulsas (`def.boxes`: {x, z, h?} em coordenadas do mundo; h = altura extra: so quem esta no ar pega)
     for (const bx of this.track.def.boxes || []) {
       const nr = this.track.nearest(bx.x, bx.z, -1, this.track.newNear());
-      this.boxes.push({ x: bx.x, z: bx.z, active: true, timer: 0, s: nr.s, h: bx.h ?? 0, gy: bx.h ? this.track.elevAt(nr.s) : 0, fixed: true });
+      // `y` (opcional) = altura absoluta da caixa (pistas de mapa); sem ela vale a altura da pista em `s`
+      const gy = bx.y !== undefined ? bx.y - (bx.h ?? 0) : bx.h ? this.track.elevAt(nr.s) : 0;
+      this.boxes.push({ x: bx.x, z: bx.z, active: true, timer: 0, s: nr.s, h: bx.h ?? 0, gy, fixed: true, y: bx.y });
     }
     groups.forEach((frac, gi) => {
       if (dens === 1 && gi % 2 === 1) return;

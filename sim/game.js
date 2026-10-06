@@ -22,6 +22,11 @@ export const RULES = {
   chasmFallMax: 3, // queda no precipicio: elimina ao sair do quadro ou, no maximo, apos esse tempo (s)
   zoomIn: 0.3, // zoom rapido no sobrevivente
   hold: 0.5, // tempo mostrando o sobrevivente
+  finishCountdown: 30, // corrida: segundos que os demais ainda tem depois que o primeiro termina
+  respawnAfter: 1.6, // corrida: carcaca vira kart de novo depois disso
+  stuckTime: 4, // corrida: parado por tanto tempo renasce no ultimo ponto seguro
+  lostTime: 3.5, // corrida: longe da rota por tanto tempo renasce
+  shieldTime: 2.5, // corrida: invulnerabilidade apos renascer
   gridRowGap: 7.5,
   gridBehind: 10, // "um pouco antes" de onde o sobrevivente ficou
 };
@@ -31,6 +36,9 @@ export function gridSlot(i) {
   const row = Math.floor(i / 2), col = i % 2;
   return { back: row * RULES.gridRowGap + col * 2.5, side: col ? 1 : -1 };
 }
+
+/** Pontos por posicao na corrida (8 jogadores); a partir da 9a, 0. */
+export const RACE_POINTS = [10, 8, 6, 5, 4, 3, 2, 1];
 
 /** Aplica a pontuacao da rodada. `deaths` = ids na ordem em que morreram. Retorna {id: delta}. */
 export function scoreRound(deaths, survivorId, allIds) {
@@ -53,11 +61,15 @@ export class Game {
    */
   constructor(players, opts) {
     this.track = opts.track;
+    this.mode = opts.mode || 'survival'; // 'survival' (rodadas, corte pela camera) | 'race' (corrida classica) | 'battle'
+    this.finishCount = 0;
+    this.firstFinishAt = -1;
+    this.results = null;
     if (!this.track.scenery) this.track.scenery = buildScenery(this.track);
     this.cup = opts.cup || 'super';
     this.rng = makeRng(opts.seed ?? 1234);
     this.cars = players.map((p) => makeCar(p.id, p));
-    this.points = new Map(this.cars.map((c) => [c.id, RULES.startPoints]));
+    this.points = new Map(this.cars.map((c) => [c.id, this.mode === 'race' ? 0 : RULES.startPoints]));
     this.items = new Items(this.track, this.cup, this.rng);
     this.camera = new ChaseCamera(opts.aspect || 16 / 9);
     this.events = [];
@@ -82,7 +94,7 @@ export class Game {
   /** Quao perto da explosao por sair da pista (1 = explode). So vale onde o terreno e aberto. */
   offroadRatio(car) {
     const t = this.track;
-    if (!car.near || t.hardWall(car.near.idx, car.near.d)) return 0;
+    if (t.map || !car.near || t.hardWall(car.near.idx, car.near.d)) return 0; // mapas: o fora de pista e so lento; poco = queda
     const out = Math.abs(car.near.d) - t.edgeAt(car.near.idx);
     return Math.max(0, out) / CAR.offroadMax;
   }
@@ -116,6 +128,14 @@ export class Game {
   }
 
   frameCamera(snap = false) {
+    if (this.mode === 'race') {
+      // corrida: a camera compartilhada so enquadra o lider (ninguem e cortado)
+      const lead = this.cars.filter((c) => c.state !== 'dead' && c.state !== 'falling').sort((a, b) => b.progress - a.progress)[0] || this.cars[0];
+      this.camera.fast = 1;
+      this.camera.computeTarget([lead], this.track);
+      if (snap) this.camera.snap();
+      return;
+    }
     const alive = this.aliveCars().filter((c) => c.state !== 'falling'); // quem despenca nao puxa a camera
     this.camera.fast = 1;
     this.camera.computeTarget(alive.length ? alive : this.cars, this.track);
@@ -193,7 +213,7 @@ export class Game {
   }
 
   explodeCar(car, cause, by = -1, ex = car.x, ez = car.z) {
-    if (!car.alive || car.state === 'falling' || car.god) return;
+    if (!car.alive || car.state === 'falling' || car.god || car.shield > 0) return;
     this.events.push({ type: 'explode', kind: cause, x: car.x, z: car.z, owner: by, car: car.id });
     this.kill(car, cause);
     // a onda de choque empurra o carro para longe do epicentro, aplicada fora do centro de massa (gera giro)
@@ -310,7 +330,7 @@ export class Game {
   step(dt) {
     switch (this.state) {
       case 'COUNTDOWN': return this.stepCountdown(dt);
-      case 'RACING': return this.stepRacing(dt);
+      case 'RACING': return this.mode === 'race' ? this.stepRace(dt) : this.stepRacing(dt);
       case 'LAST_STAND': return this.stepLastStand(dt);
       default: return; // MATCH_END: congelado
     }
@@ -394,6 +414,94 @@ export class Game {
     }
     // fim de rodada: so avaliado em RACING (evita falso vencedor no respawn)
     if (this.cars.length >= 2 && this.cars.filter((c) => c.alive).length <= 1) this.endRound();
+  }
+
+  // ------------------------------------------------------------ corrida classica
+  /** Ordem da corrida: quem terminou (por colocacao) e depois os demais pelo progresso. */
+  raceOrder() {
+    return this.cars.slice().sort((a, b) => (a.finished && b.finished ? a.place - b.place : a.finished ? -1 : b.finished ? 1 : b.progress - a.progress));
+  }
+
+  stepRace(dt) {
+    this.time += dt;
+    this.stepWheels(dt);
+    for (const c of this.cars) {
+      if (c.wantFire) {
+        c.wantFire = false;
+        if (c.alive) this.items.use(c, this);
+      }
+      this.physics(c, dt);
+      this.raceKeep(c, dt);
+    }
+    const live = this.cars.filter((c) => c.alive || c.state === 'wreck');
+    for (let i = 0; i < live.length; i++) {
+      for (let j = i + 1; j < live.length; j++) collideCars(live[i], live[j], this.events);
+    }
+    this.items.update(dt, this);
+    this.frameCamera();
+    this.raceFinish();
+  }
+
+  /** Corrida: guarda o ultimo ponto seguro de cada carro e o faz renascer quando cai, explode, fica preso ou se perde. */
+  raceKeep(c, dt) {
+    if (c.shield > 0) c.shield -= dt;
+    if (c.state === 'falling') { if (c.fall > 0.9) this.respawn(c, 'fall'); return; }
+    if (c.state === 'dead') { this.respawn(c, 'fall'); return; }
+    if (!c.alive) { // carcaca
+      c.deadT = (c.deadT || 0) + dt;
+      if (c.deadT > RULES.respawnAfter) this.respawn(c, 'wreck');
+      return;
+    }
+    if (c.state !== 'run' || !c.near || c.locked) return;
+    const hw = this.track.hwAt(c.near.idx);
+    c.safeT = (c.safeT || 0) + dt;
+    if (c.safeT > 0.5 && !c.air && Math.abs(c.near.d) < hw * 0.8 + 2 && c.speed > 3) {
+      c.safe = { progress: c.progress, d: Math.max(-hw * 0.5, Math.min(hw * 0.5, c.near.d)) };
+      c.safeT = 0;
+    }
+    c.stuckT = c.speed < 2 && !c.finished ? (c.stuckT || 0) + dt : 0;
+    c.lostT = Math.abs(c.near.d) > hw + 30 ? (c.lostT || 0) + dt : 0;
+    if (c.stuckT > RULES.stuckTime || c.lostT > RULES.lostTime) this.respawn(c, 'stuck');
+  }
+
+  /** Renasce o carro na pista, no ultimo ponto seguro, com um pouco de velocidade e invulneravel por alguns segundos. */
+  respawn(c, cause) {
+    const safe = c.safe || { progress: Math.max(c.progress - 6, -3), d: 0 };
+    placeCar(c, this.track, safe.progress - 1, safe.d);
+    c.hidden = false;
+    c.locked = false;
+    c.state = 'run';
+    c.vx = Math.cos(c.h) * 12; c.vz = Math.sin(c.h) * 12;
+    c.shield = RULES.shieldTime;
+    c.deadT = c.stuckT = c.lostT = c.safeT = 0;
+    c.wantFire = false;
+    this.events.push({ type: 'respawn', car: c.id, x: c.x, z: c.z, cause });
+  }
+
+  /** Chegada: quem completa as voltas ganha a colocacao; termina quando todos chegam ou 30 s depois do primeiro. */
+  raceFinish() {
+    const need = this.track.length * (this.track.def.laps ?? RULES.laps);
+    for (const c of this.cars) {
+      if (c.finished || c.progress < need) continue;
+      c.finished = true; c.finishTime = this.time; c.place = ++this.finishCount;
+      if (this.firstFinishAt < 0) this.firstFinishAt = this.time;
+      this.events.push({ type: 'finish', car: c.id, place: c.place, time: this.time });
+    }
+    if (this.debug.infinite) return;
+    if (this.cars.every((c) => c.finished) || (this.firstFinishAt >= 0 && this.time - this.firstFinishAt > RULES.finishCountdown)) this.endRace();
+  }
+
+  endRace() {
+    const order = this.raceOrder();
+    this.results = order.map((c, i) => {
+      if (!c.finished) c.place = this.finishCount + 1 + (i - this.finishCount);
+      return { id: c.id, place: i + 1, points: RACE_POINTS[i] ?? 0, finished: !!c.finished, time: c.finishTime ?? null, progress: c.progress };
+    });
+    for (const r of this.results) this.points.set(r.id, r.points);
+    this.winner = order[0].id;
+    this.endReason = 'race';
+    this.state = 'MATCH_END';
+    this.events.push({ type: 'matchEnd', winner: this.winner, reason: 'race', results: this.results, points: Object.fromEntries(this.points) });
   }
 
   /** Retardatario perto de sair do quadro ganha velocidade ate voltar para perto do centro da tela. */

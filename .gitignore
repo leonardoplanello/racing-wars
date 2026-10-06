@@ -3,3 +3,9 @@ dist/
 .DS_Store
 Thumbs.db
 *.log
+
+# SRB2Kart e outros jogos: dados locais, nunca versionados
+other-games/
+local-assets/
+public/tracks/srb2kart/
+roms/

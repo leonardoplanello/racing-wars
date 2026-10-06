@@ -67,7 +67,7 @@ export class Actors {
       glow.scale.setScalar(5.5);
       g.add(m, glow);
       this.root.add(g);
-      this.boxes.push({ g, m, y: game.track.elevAt(b.s) + (b.h || 0) });
+      this.boxes.push({ g, m, y: b.y ?? game.track.elevAt(b.s) + (b.h || 0) });
     }
   }
 
@@ -106,7 +106,9 @@ export class Actors {
       truck.flame.visible = c.boost > 0;
       if (c.boost > 0) truck.flame.scale.set(0.8 + Math.random() * 0.7, 1, 1);
       if (v.blob) {
-        v.blob.position.set(c.x, (c.near ? track.groundFromNear(c.near, this._g || (this._g = { y: 0, nx: 0, ny: 1, nz: 0 })).y : 0) + 0.1, c.z);
+        const gnd = this._g || (this._g = { y: 0, nx: 0, ny: 1, nz: 0 });
+        const gy = track.map ? track.map.groundAt(c.x, c.z, c.y + 0.3, gnd).y : c.near ? track.groundFromNear(c.near, gnd).y : 0;
+        v.blob.position.set(c.x, gy + 0.1, c.z);
         v.blob.rotation.y = -c.h;
         v.blob.scale.setScalar(Math.max(0.35, 1 - Math.max(0, c.y) * 0.06));
       }

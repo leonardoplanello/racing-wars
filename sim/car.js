@@ -179,7 +179,7 @@ export function stepCar(car, track, dt, events) {
     car.freeze -= dt;
     if (car.freeze <= 0) { car.freeze = 0; if (events) events.push({ type: 'unfreeze', car: car.id, x: car.x, y: car.y, z: car.z }); }
   }
-  const surf = car.near ? track.surfaceAt(car.near.idx) : 0;
+  const surf = track.map ? mapSurface(car, track, events) : car.near ? track.surfaceAt(car.near.idx) : 0;
   car.surf = surf;
   car.contactPrev = car.contact;
   car.contact = false;
@@ -208,9 +208,12 @@ export function stepCar(car, track, dt, events) {
   track.nearest(car.x, car.z, near.idx, near);
   const hw = track.hwAt(near.idx);
   const ad = Math.abs(near.d);
-  car.onVerge = ad > hw;
+  car.onVerge = track.map ? false : ad > hw; // nas pistas de mapa o fora de pista e uma superficie (SURF.OFF*)
 
-  if (track.boundary === 'wall') {
+  if (track.map) {
+    mapContacts(car, track, events);
+    if (car.mapDeath && car.state === 'run') startFall(car, events, 'fall');
+  } else if (track.boundary === 'wall') {
     for (let i = 0; i < HULL.length; i++) wallContact(car, track, i, hw, events);
     sceneryContact(car, track.scenery, events);
   } else if (track.boundary === 'void') {
@@ -281,24 +284,27 @@ function airStep(car, dt) {
 
 /** Altura: segue o chao (rampa/plateau) e decola quando o chao some mais rapido que a gravidade permite. */
 function verticalStep(car, track, dt, events, px, pz) {
-  const near = car.near, G = CAR.gravity;
-  track.groundFromNear(near, GP);
+  const near = car.near, G = CAR.gravity, step = track.stepUp ?? 0.8;
+  if (track.map) track.map.groundAt(car.x, car.z, car.y, GP); else track.groundFromNear(near, GP);
   if (car.locked) { car.y = GP.y; car.vy = 0; car.air = false; return; }
   // degrau alto demais a frente (face da falesia): bate e volta
-  if (GP.y - car.y > 0.8) {
+  if (GP.y - car.y > step) {
     const sp = Math.hypot(car.vx, car.vz);
     if (events && sp > 3) events.push({ type: 'wall', what: 'wall', car: car.id, x: car.x, z: car.z, nx: car.vx / sp, nz: car.vz / sp, strength: Math.min(1, sp / 18) });
     car.x = px; car.z = pz;
     car.vx *= -0.25; car.vz *= -0.25;
     car.contact = true;
     track.nearest(car.x, car.z, near.idx, near);
-    track.groundFromNear(near, GP);
+    if (track.map) track.map.groundAt(car.x, car.z, car.y, GP); else track.groundFromNear(near, GP);
   }
   if (!car.air) {
     const yFree = car.y + car.vy * dt - 0.5 * G * dt * dt;
-    if (GP.y < yFree - 1e-3 && car.y - GP.y > 1e-3) car.air = true; // o chao fugiu: voo balistico com a velocidade da rampa
+    // pistas de mapa: degraus pequenos para baixo (rampas feitas de pisos 3D empilhados) nao fazem o carro decolar
+    const tol = track.map ? step * 0.6 : 1e-3;
+    if (GP.y < yFree - tol && car.y - GP.y > tol) car.air = true; // o chao fugiu: voo balistico com a velocidade da rampa
     else {
       car.vy = car.vy * 0.2 + ((GP.y - car.y) / dt) * 0.8;
+      if (track.map) car.vy = Math.max(-30, Math.min(30, car.vy));
       car.y = GP.y;
     }
   }
@@ -321,6 +327,7 @@ function verticalStep(car, track, dt, events, px, pz) {
 
 /** Inclinacao do chao ao longo do rumo do carro (so no tabuleiro). */
 function groundPitch(car, track) {
+  if (track.map) return Math.atan(-(GP.nx * Math.cos(car.h) + GP.nz * Math.sin(car.h)) / Math.max(0.2, GP.ny)); // GP = chao do passo atual
   const near = car.near;
   if (Math.abs(near.d) > track.edgeAt(near.idx)) return 0;
   return Math.atan(track.slopeAt(near.s) * (near.tx * Math.cos(car.h) + near.tz * Math.sin(car.h)));
@@ -474,6 +481,94 @@ function wallContact(car, track, i, hw, events) {
   car.x -= nx * pen;
   car.z -= nz * pen;
   staticImpulse(car, nx, nz, cx, cz, R, CAR.wallE, 0.35, events, 'wall');
+}
+
+const DT_CAR = 1 / 120; // passo fixo (so para temporizadores internos do carro)
+const MG = { y: 0, sec: 0, fof: -1, nx: 0, ny: 1, nz: 0, si: 0 };
+const MT = { y: 0, sec: 0, fof: -1, nx: 0, ny: 1, nz: 0 };
+const MI = { off: 0, boost: false, finish: false, death: false };
+
+/**
+ * Pistas de mapa (SRB2Kart): piso especial sob o carro. Fora de pista vira SURF.OFF1..3 (4..6), o painel de sneaker da nitro
+ * e poco/morte/vazio derruba o carro. So vale com o carro no chao e correndo.
+ */
+function mapSurface(car, track) {
+  const w = track.map;
+  w.groundAt(car.x, car.z, car.y, MG);
+  w.surfaceInfo(MG.sec, MI);
+  car.mapDeath = false;
+  if (car.padCd > 0) car.padCd -= DT_CAR;
+  if (!car.locked && car.state === 'run' && !car.air && car.y - MG.y < 0.3) {
+    if (MI.boost) car.boost = Math.max(car.boost, 1.3);
+    if (!(car.padCd > 0)) {
+      // mola: salto; dash pad: nitro e rumo da seta; elo assistido: salto invisivel que liga dois pontos que o mapa original
+      // vence com saltos de rampa, degraus altos ou vaos. O lancamento (vy e velocidade) vem da rota importada.
+      let rec = null;
+      if (MI.spring || MI.dash) rec = track.springs[MG.sec] || null;
+      if (!rec && track.assists.length) {
+        const fx = Math.cos(car.h), fz = Math.sin(car.h);
+        for (const a of track.assists) {
+          const dx = a.x - car.x, dz = a.z - car.z;
+          if (dx * dx + dz * dz < a.r * a.r && fx * a.dx + fz * a.dz > 0.4) { rec = a; break; }
+        }
+      }
+      if (MI.dash) {
+        car.boost = Math.max(car.boost, 1.2);
+        const pad = track.pads[MG.sec];
+        if (pad && !pad.noSnap) {
+          const sp = Math.max(car.speed, CAR.cruise);
+          car.h = Math.atan2(pad.dz, pad.dx);
+          car.vx = Math.cos(car.h) * sp; car.vz = Math.sin(car.h) * sp; car.w = 0;
+        }
+      }
+      if (rec || MI.spring) {
+        if (rec) {
+          const sp = Math.max(rec.v, 8);
+          car.h = Math.atan2(rec.dz, rec.dx);
+          car.vx = Math.cos(car.h) * sp; car.vz = Math.sin(car.h) * sp; car.w = 0;
+        } else if (car.speed > 0.5 && car.speed < CAR.cruise) { car.vx *= CAR.cruise / car.speed; car.vz *= CAR.cruise / car.speed; }
+        car.vy = rec ? rec.vy : 14;
+        car.air = true;
+        car.y += 0.02;
+      }
+      if (rec || MI.spring || MI.dash) car.padCd = 0.5;
+    }
+    car.mapDeath = MI.death || (w.isVoid(MG.si) && MG.fof < 0); // a queda comeca depois do movimento (mapContacts)
+  }
+  return MI.off ? 3 + MI.off : 0;
+}
+
+/**
+ * Paredes de um mapa: cada circulo do casco contra as linhas proximas. Bloqueia linha de um lado, IMPASSIVEL, ou degrau
+ * que o carro nao alcanca (a superficie do outro lado mais alta que a altura + degrau). Normal para o lado do obstaculo.
+ */
+function mapContacts(car, track, events) {
+  const w = track.map, R = CAR.circleR, y = car.y;
+  for (let i = 0; i < HULL.length; i++) {
+    const { x: cx, z: cz } = hullPos(car, i, HP);
+    w.forLines(cx, cz, R + 0.01, (li, l) => {
+      const ax = l[0], az = l[1], ex = l[2] - ax, ez = l[3] - az, len2 = ex * ex + ez * ez;
+      let t = len2 > 0 ? ((cx - ax) * ex + (cz - az) * ez) / len2 : 0;
+      t = t < 0 ? 0 : t > 1 ? 1 : t;
+      const px = ax + ex * t, pz = az + ez * t, dx = px - cx, dz = pz - cz, d2 = dx * dx + dz * dz;
+      if (d2 >= R * R) return;
+      const cross = ex * (cz - az) - ez * (cx - ax); // > 0: o centro esta na frente da linha
+      let block = l[6] < 0 || l[7] < 0 || (l[4] & 1) !== 0;
+      if (!block) {
+        const near = cross > 0 ? l[6] : l[7];
+        block = !w.surfaceIn(near === l[6] ? l[7] : l[6], px, pz, y, MT);
+      }
+      if (!block) return;
+      const d = Math.sqrt(d2);
+      let nx, nz;
+      if (d > 1e-6) { nx = dx / d; nz = dz / d; } else { const k = Math.sqrt(len2) || 1; nx = (cross > 0 ? ez : -ez) / k; nz = (cross > 0 ? -ex : ex) / k; }
+      const pen = R - d;
+      car.x -= nx * pen;
+      car.z -= nz * pen;
+      car.contact = true;
+      staticImpulse(car, nx, nz, cx, cz, R, CAR.wallE, 0.35, events, 'wall');
+    });
+  }
 }
 
 /** Colisao com o cenario solido (arvores, pedras, casas). */

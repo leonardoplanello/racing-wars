@@ -140,7 +140,7 @@ export function tumbleStep(car, track, dt, p) {
       R3[2] = M9[6] * lx + M9[7] * ly + M9[8] * lz;
       const px = cgx + R3[0], pz = cgz + R3[2];
       const py = car.y + B.cg * M9[4] + R3[1];
-      track.groundAt(px, pz, hint, GN);
+      track.groundAt(px, pz, hint, GN, py);
       const pen = GN.y - py;
       if (pen < -0.03) continue;
       touched = true;
@@ -198,7 +198,7 @@ export function stepWheel(wh, track, dt, g) {
   qmat(wh.q, M9);
   // eixo local z (cilindro): inercia no corpo = [perp, perp, axial]
   const I = [WI[1], WI[1], WI[0]];
-  track.groundAt(wh.x, wh.z, wh.hint, GN);
+  track.groundAt(wh.x, wh.z, wh.hint, GN, wh.y + 0.5);
   if (track._gn) wh.hint = track._gn.idx;
   let touched = false, worst = 0;
   const gyAt = (px, pz) => GN.y - GN.nx / GN.ny * (px - wh.x) - GN.nz / GN.ny * (pz - wh.z);

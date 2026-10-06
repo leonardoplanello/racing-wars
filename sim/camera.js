@@ -59,6 +59,101 @@ export function projectWith(cx, cy, cz, yaw, aspect, px, py, pz, out) {
   return out;
 }
 
+// ---------------------------------------------------------------------------------------------------------
+// Camera de kart (estilo SRB2Kart), um por jogador na tela dividida. Segue o RUMO do kart, atras e acima dele,
+// olhando um pouco a frente. Valores do SRB2Kart v1.6 (p_user.c: P_MoveChaseCamera) em unidades do jogo
+// original (kart de raio 16); `scale` converte para o nosso mundo (carro de ~3,3 u). Os filtros do original
+// sao por tic (35 Hz): k = -ln(1 - alfa) * 35 por segundo (yaw 0,4; z 0,2; pitch 0,125; pan 0,1).
+// So afeta o que se ve: as regras (corte de carros) continuam na ChaseCamera compartilhada.
+export const KART_CAM = {
+  scale: 0.1,
+  dist: 160, // atras do kart
+  height: 82, // acima do chao do kart (32 + 50)
+  lookAhead: 64, // o ponto de mira fica a frente do kart
+  lookZ: 48, // e a esta altura
+  fovH: 90, // FOV horizontal em graus
+  fov2P: 1.7, // 2 jogadores (celula larga e baixa): alarga o FOV horizontal (tan x 1,7)
+  fovMin: 38, fovMax: 85, // limites do FOV vertical
+  kYaw: 17.9, kZ: 7.8, kPitch: 4.7, kPan: 3.7,
+  panMax: 0.2, // fracao da distancia
+  panSlip: 8, // u/s de derrapagem lateral que da o pan maximo
+  boostPull: 11 / 16, // com nitro a camera se aproxima ate esta fracao da distancia
+  boostIn: 4.4, boostOut: 1, // 1/s (o original: +1/8 por tic para entrar, -1/35 por tic para sair)
+  overspeed: 0.029, // fracao da distancia somada por u/s acima da velocidade de cruzeiro (nitro = +52%)
+};
+
+const clampN = (v, a, b) => Math.max(a, Math.min(b, v));
+
+/** FOV vertical (graus) de uma celula de proporcao `aspect` com `n` celulas na tela. */
+export function kartFovV(aspect, n = 1) {
+  const t = (Math.tan((KART_CAM.fovH * RAD) / 2) * (n === 2 ? KART_CAM.fov2P : 1)) / Math.max(0.2, aspect);
+  return clampN((2 * Math.atan(t)) / RAD, KART_CAM.fovMin, KART_CAM.fovMax);
+}
+
+export class KartCamera {
+  constructor() {
+    this.x = 0; this.y = 0; this.z = 0;
+    this.yaw = 0; // rumo da camera (rad; frente = (cos, sin) em x,z)
+    this.pitch = 0.15; // para baixo (rad)
+    this.pan = 0; this.boostCam = 0;
+    this.ready = false;
+  }
+
+  /** Vetor da frente da camera (Three: x, y para cima, z). */
+  forward(out = { x: 0, y: 0, z: 0 }) {
+    const cp = Math.cos(this.pitch);
+    out.x = Math.cos(this.yaw) * cp; out.y = -Math.sin(this.pitch); out.z = Math.sin(this.yaw) * cp;
+    return out;
+  }
+
+  _place(car, dist) {
+    const K = KART_CAM, s = K.scale, fx = Math.cos(this.yaw), fz = Math.sin(this.yaw), rx = -fz, rz = fx;
+    this.x = car.x - fx * dist + rx * this.pan;
+    this.z = car.z - fz * dist + rz * this.pan;
+    return { lx: car.x + fx * K.lookAhead * s + rx * this.pan, lz: car.z + fz * K.lookAhead * s + rz * this.pan, ly: (car.y || 0) + K.lookZ * s };
+  }
+
+  /** Teletransporta para tras do carro (inicio, troca de alvo). */
+  snap(car) {
+    const K = KART_CAM, s = K.scale;
+    this.yaw = car.h; this.pan = 0; this.boostCam = 0;
+    this.y = (car.y || 0) + K.height * s;
+    const l = this._place(car, K.dist * s);
+    this.pitch = Math.atan2(this.y - l.ly, Math.hypot(l.lx - this.x, l.lz - this.z));
+    this.ready = true;
+  }
+
+  /**
+   * Avanca dt segundos seguindo o carro. opts: top (velocidade de cruzeiro, u/s), lookBack (olhar para tras:
+   * giro instantaneo de 180 graus).
+   */
+  update(dt, car, opts = {}) {
+    if (!this.ready) this.snap(car);
+    const K = KART_CAM, s = K.scale, top = opts.top ?? 34;
+    const k = (r) => 1 - Math.exp(-r * dt);
+    const target = car.h + (opts.lookBack ? Math.PI : 0);
+    if (opts.lookBack) this.yaw = target;
+    else this.yaw += wrap(target - this.yaw) * k(K.kYaw);
+
+    const speed = car.speed ?? Math.hypot(car.vx || 0, car.vz || 0);
+    const bt = car.boost > 0 ? 1 : 0;
+    this.boostCam += (bt - this.boostCam) * k(bt > this.boostCam ? K.boostIn : K.boostOut);
+    let dist = K.dist * s * (1 + K.overspeed * Math.max(0, speed - top));
+    dist -= K.boostPull * dist * this.boostCam;
+
+    // pan lateral para dentro da curva, a partir da derrapagem (velocidade lateral do carro)
+    const lat = -(car.vx || 0) * Math.sin(car.h) + (car.vz || 0) * Math.cos(car.h);
+    const panT = -clampN(lat / K.panSlip, -1, 1) * K.panMax * dist;
+    this.pan += (panT - this.pan) * k(K.kPan);
+
+    const zT = (car.y || 0) + K.height * s;
+    this.y += (zT - this.y) * k(K.kZ);
+    const l = this._place(car, dist);
+    const aim = Math.atan2(this.y - l.ly, Math.hypot(l.lx - this.x, l.lz - this.z));
+    this.pitch += (aim - this.pitch) * k(K.kPitch);
+  }
+}
+
 export class ChaseCamera {
   constructor(aspect = 16 / 9) {
     this.aspect = aspect;
