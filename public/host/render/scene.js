@@ -57,7 +57,7 @@ export function createScene(canvas, quality = 'high') {
     camera.aspect = size.aspect;
     camera.updateProjectionMatrix();
     const sk = cam.shakeOffset(shakeV);
-    camera.position.set(cam.x + sk.x, cam.y + sk.y, cam.z + sk.z);
+    camera.position.set((cam.vx ?? cam.x) + sk.x, (cam.vy ?? cam.y) + sk.y, (cam.vz ?? cam.z) + sk.z); // vx..vz: posicao desviando de paredes/tetos
     const cp = Math.cos(CAMERA.pitch), sp = Math.sin(CAMERA.pitch);
     const fx = Math.cos(cam.yaw) * cp, fz = Math.sin(cam.yaw) * cp;
     camera.lookAt(camera.position.x + fx * 50, camera.position.y - sp * 50, camera.position.z + fz * 50);
@@ -89,6 +89,33 @@ export function createScene(canvas, quality = 'high') {
     const s = theme.sun || [0xfff1d0, 2.6, -45, 90, 30];
     sun.color.set(s[0]); sun.intensity = s[1]; sunOff.x = s[2]; sunOff.y = s[3]; sunOff.z = s[4];
     renderer.toneMappingExposure = theme.exposure ?? 1.05;
+  }
+
+  /**
+   * Ceu de pista do SRB2Kart: o panorama SKYn (256 px) repetido 4x em volta, do zenite ao horizonte; abaixo do horizonte, a cor da
+   * ultima linha. Vira o fundo equiretangular da cena; se a imagem falhar, fica o degrade do tema.
+   */
+  function setSkyImage(url) {
+    const gen = (setSkyImage.gen = (setSkyImage.gen || 0) + 1);
+    const img = new Image();
+    img.onload = () => {
+      if (gen !== setSkyImage.gen) return; // outra pista ja foi carregada
+      const W = 1024, H = 512, cv = document.createElement('canvas');
+      cv.width = W; cv.height = H;
+      const g = cv.getContext('2d');
+      g.imageSmoothingEnabled = false;
+      const t = document.createElement('canvas'); t.width = img.width; t.height = img.height;
+      const tg = t.getContext('2d'); tg.drawImage(img, 0, 0);
+      const px = tg.getImageData(0, img.height - 1, 1, 1).data;
+      g.fillStyle = `rgb(${px[0]},${px[1]},${px[2]})`;
+      g.fillRect(0, 0, W, H);
+      for (let x = 0; x < W; x += img.width * 1.0) g.drawImage(img, x, 0, img.width, H / 2); // zenite (topo) ao horizonte (meio)
+      const tex = new THREE.CanvasTexture(cv);
+      tex.mapping = THREE.EquirectangularReflectionMapping;
+      tex.colorSpace = THREE.SRGBColorSpace;
+      scene.background = tex;
+    };
+    img.src = url;
   }
 
   // ---- tela dividida: uma camera Three por celula, desenhada com viewport + scissor
@@ -143,5 +170,5 @@ export function createScene(canvas, quality = 'high') {
     return out;
   }
 
-  return { THREE, renderer, scene, camera, sun, size, resize, frame, applyTheme, toScreen, render: () => renderer.render(scene, camera), renderViews, toScreenView, setSunShadow, quality, shadows };
+  return { THREE, renderer, scene, camera, sun, size, resize, frame, applyTheme, setSkyImage, toScreen, render: () => renderer.render(scene, camera), renderViews, toScreenView, setSunShadow, quality, shadows };
 }

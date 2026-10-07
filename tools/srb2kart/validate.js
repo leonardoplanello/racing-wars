@@ -19,7 +19,7 @@ export function simulate(data, { secs = 200, bots = 8, seed = 5 } = {}) {
   let falls = 0, walls = 0, lapAt = 0;
   const L = track.length;
   for (let t = 0; t < secs; t += 1 / 60) {
-    for (const c of game.cars) if (c.alive && c.near) { const r = think(brains.get(c.id), c, game, 1 / 60); game.setInput(c.id, r.steer, r.fire); }
+    for (const c of game.cars) if (c.alive && c.near) { const r = think(brains.get(c.id), c, game, 1 / 60); game.setInput(c.id, r.steer, r.fire, r.rev); }
     game.update(1 / 60);
     for (const e of game.drainEvents()) { if (e.type === 'fall') falls++; else if (e.type === 'wall') walls++; }
     if (!lapAt && game.cars.some((c) => c.progress >= L)) { lapAt = t; if (secs > t + 15) secs = t + 15; } // ja completou: basta
@@ -37,7 +37,7 @@ function main() {
     if (want.length && !want.includes(t.id)) continue;
     const data = JSON.parse(fs.readFileSync(path.join(TRACKS_DIR, t.file), 'utf8'));
     const t0 = Date.now();
-    const r = simulate(data, { secs: Math.min(300, 40 + (t.length / 20) * 2.2) });
+    const r = simulate(data, { secs: Math.min(900, 40 + (t.length / 20) * 2.6) }); // pistas longas levam mais de 5 min por volta
     t.sim = r;
     t.lapSeconds = r.lapSeconds;
     t.playable = r.done >= 3 || (r.done >= 1 && r.best >= 1);

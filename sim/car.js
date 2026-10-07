@@ -32,24 +32,28 @@ export const CAR = {
   a: 1.28, // CG -> eixo dianteiro
   b: 0.92, // CG -> eixo traseiro
   inertia: 1.45, // momento de inercia (massa = 1)
-  g: 58, // escala das aderencias (aceleracao lateral maxima = mu * g)
-  cruise: 34,
+  g: 62, // escala das aderencias (aceleracao lateral maxima = mu * g)
+  cruise: 42,
   reverseSpeed: 16,
-  boostSpeed: 52,
-  engineCap: 34, // aceleracao maxima do motor
-  boostCap: 72,
+  boostSpeed: 62,
+  engineCap: 42, // aceleracao maxima do motor
+  boostCap: 88,
   brakeCap: 26,
   kp: 6, // ganho do controle de cruzeiro
   steerMax: 0.68, // rad no volante, em baixa velocidade
-  steerRef: 23, // a esterco diminui com a velocidade
+  steerRef: 28, // a esterco diminui com a velocidade
   steerRate: 26, // velocidade do volante (1/s): resposta rapida
   gripAssist: 1.15, // fracao da aderencia que o auxilio de direcao deixa o volante usar (evita rodar so de esterçar)
+  driftLoss: 0.2, // drift leve: fracao da aderencia traseira perdida em curva forte e rapida
+  driftSpeed: 22, // velocidade a partir da qual o drift comeca a valer
   steerCurve: 0.8, // <1 deixa o volante mais sensivel perto do centro (|s|^curve)
   catchupBoost: 0.2, // retardatario perto de sair do quadro ganha ate +20% de velocidade
   alphaSatF: 0.16, // rad: deriva em que o pneu dianteiro satura
   alphaSatR: 0.11, // traseiro mais "duro": carro estavel (subesterca no limite)
   wallE: 0.22,
   carE: 0.45,
+  carFriction: 0.05, // atrito tangencial na batida carro x carro (menor = lateral mais escorregadia)
+  sideSlide: 3, // contato lateral: velocidade (u/s) com que os carros sao afastados um do outro, para nao grudarem
   gravity: 26,
   stunTime: 1.6,
   offroadMax: 28, // distancia alem da borda da estrada em que o carro explode
@@ -84,13 +88,14 @@ export function makeCar(id, opts = {}) {
 const wrapAngle = (a) => Math.atan2(Math.sin(a), Math.cos(a));
 
 /** Posiciona o carro sobre a pista em `progress` (nao normalizado) com offset lateral d. */
-export function placeCar(car, track, progress, d) {
+export function placeCar(car, track, progress, d, at = null) {
   const p = track.pointAt(progress);
   car.x = p.x + p.nx * d;
   car.z = p.z + p.nz * d;
   car.h = Math.atan2(p.tz, p.tx);
   car.vx = car.vz = car.w = 0;
   car.y = track.elevAt(progress);
+  if (at) { car.x = at.x; car.z = at.z; car.y = at.y; car.h = at.h; } // ponto real (respawn): nivel e rumo de onde o carro estava
   car.vy = 0;
   car.spin = car.spinVel = 0;
   car.pitch = car.roll = car.ox = car.oz = 0;
@@ -381,6 +386,8 @@ function driveStep(car, surf, dt) {
   const fmaxF = mu * CAR.g * FRONT_LOAD * bg;
   // traseira atingida: perde aderencia por um instante e o carro roda com facilidade
   const fmaxR0 = mu * CAR.g * REAR_LOAD * bg * (1 - 0.6 * Math.min(1, car.destab / 0.5));
+  const driftK = Math.min(1, Math.max(0, (Math.abs(car.steerSm) - 0.55) / 0.35)) * Math.min(1, Math.max(0, (u - CAR.driftSpeed) / 12));
+  const fmaxRd = fmaxR0 * (1 - CAR.driftLoss * driftK * (car.boost > 0 ? 0.4 : 1));
 
   // volante suavizado; menos esterco em alta velocidade
   car.steerSm += Math.max(-CAR.steerRate * dt, Math.min(CAR.steerRate * dt, car.steer - car.steerSm));
@@ -420,7 +427,7 @@ function driveStep(car, surf, dt) {
   const fyF = -fmaxF * Math.tanh(alphaF / CAR.alphaSatF);
   // circulo de atrito do eixo traseiro: quanto mais tracao, menos forca lateral
   const ratio = Math.min(bg > 1 ? 0.5 : 0.85, Math.abs(fx_drive) / (fmaxR0 * 1.15));
-  const fmaxR = fmaxR0 * Math.sqrt(1 - ratio * ratio);
+  const fmaxR = fmaxRd * Math.sqrt(1 - ratio * ratio);
   const fyR = -fmaxR * Math.tanh(alphaR / CAR.alphaSatR);
 
   const cd = Math.cos(delta), sd = Math.sin(delta);
@@ -509,7 +516,17 @@ function mapSurface(car, track) {
         const fx = Math.cos(car.h), fz = Math.sin(car.h);
         for (const a of track.assists) {
           const dx = a.x - car.x, dz = a.z - car.z;
-          if (dx * dx + dz * dz < a.r * a.r && fx * a.dx + fz * a.dz > 0.4) { rec = a; break; }
+          if (dx * dx + dz * dz >= a.r * a.r) continue;
+          // sem `f` (dados antigos) vale o alinhamento com o salto; com `f` basta estar no trecho certo e andando para a frente
+          // (saltos em cotovelo em U partem de um ponto que o carro cruza em outro rumo)
+          if (a.f === undefined && fx * a.dx + fz * a.dz <= 0.4) continue;
+          if (a.f !== undefined && car.near && fx * car.near.tx + fz * car.near.tz <= 0.2) continue;
+          if (a.f !== undefined && car.near) { // so dispara para quem esta no trecho da pista a que o salto pertence (outra perna cruza o mesmo ponto)
+            let sep = Math.abs(car.near.s - a.f * track.length);
+            sep = Math.min(sep, track.length - sep);
+            if (sep > 40) continue;
+          }
+          rec = a; break;
         }
       }
       if (MI.dash) {
@@ -555,8 +572,10 @@ function mapContacts(car, track, events) {
       const cross = ex * (cz - az) - ez * (cx - ax); // > 0: o centro esta na frente da linha
       let block = l[6] < 0 || l[7] < 0 || (l[4] & 1) !== 0;
       if (!block) {
-        const near = cross > 0 ? l[6] : l[7];
-        block = !w.surfaceIn(near === l[6] ? l[7] : l[6], px, pz, y, MT);
+        // altura do carro no ponto de contato: numa rampa o piso do lado de ca ja subiu ate la (senao o topo da rampa vira "degrau")
+        const near = cross > 0 ? l[6] : l[7], far = near === l[6] ? l[7] : l[6];
+        w.surfaceIn(near, px, pz, y, MT);
+        block = !w.surfaceIn(far, px, pz, Math.max(y, MT.y), MT);
       }
       if (!block) return;
       const d = Math.sqrt(d2);
@@ -685,6 +704,7 @@ export function collideCars(a, b, events) {
     if (b.state === 'wreck' && deep > 0.05) b.asleep = false;
   }
   if (!n) return;
+  const latCos = deep > 0 ? Math.abs((sx * Math.cos(a.h) + sz * Math.sin(a.h)) / (Math.hypot(sx, sz) || 1)) : 1;
   for (let it = 0; it < 8; it++) {
     for (let q = 0; q < n; q++) {
       const c = CONTACTS[q];
@@ -696,6 +716,15 @@ export function collideCars(a, b, events) {
       a.vx -= (j * c.nx) / ma; a.vz -= (j * c.nz) / ma; a.w -= (j * c.rna) / Ia;
       b.vx += (j * c.nx) / mb; b.vz += (j * c.nz) / mb; b.w += (j * c.rnb) / Ib;
     }
+  }
+  // contato lateral (normal quase perpendicular ao rumo): afasta os dois ao longo da normal para nao grudarem
+  const lat = Math.max(0, 1 - latCos / 0.35);
+  if (lat > 0 && a.state !== 'wreck' && b.state !== 'wreck') {
+    const sl = Math.hypot(sx, sz) || 1, dnx = sx / sl, dnz = sz / sl;
+    const rel = (b.vx - a.vx) * dnx + (b.vz - a.vz) * dnz;
+    const add = Math.max(0, CAR.sideSlide * lat - rel);
+    a.vx -= dnx * add * mb / (ma + mb); a.vz -= dnz * add * mb / (ma + mb);
+    b.vx += dnx * add * ma / (ma + mb); b.vz += dnz * add * ma / (ma + mb);
   }
   let worst = 0, hx = 0, hz = 0;
   for (let q = 0; q < n; q++) {
@@ -710,7 +739,7 @@ export function collideCars(a, b, events) {
     // atrito tangencial leve
     const tx = -c.nz, tz = c.nx;
     const vt = (b.vx - b.w * c.rbz - (a.vx - a.w * c.raz)) * tx + (b.vz + b.w * c.rbx - (a.vz + a.w * c.rax)) * tz;
-    const jt = Math.max(-0.08 * c.acc, Math.min(0.08 * c.acc, -vt * 0.3)); // pouco atrito: os carros escorregam um pelo outro
+    const jt = Math.max(-CAR.carFriction * c.acc, Math.min(CAR.carFriction * c.acc, -vt * 0.3)); // pouco atrito: os carros escorregam um pelo outro
     a.vx -= (jt * tx) / ma; a.vz -= (jt * tz) / ma;
     b.vx += (jt * tx) / mb; b.vz += (jt * tz) / mb;
     if (-c.vn0 > worst) { worst = -c.vn0; hx = c.px; hz = c.pz; }

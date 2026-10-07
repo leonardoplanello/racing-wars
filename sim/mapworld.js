@@ -106,6 +106,29 @@ export class MapWorld {
     return reach;
   }
 
+  /**
+   * Superficie de (x,z) no setor `si` mais PROXIMA de yRef (piso do setor ou topo de piso 3D solido), dentro de `tol`. Usada pela
+   * linha central: segue o nivel do caminho original em vez de despencar para o piso de baixo ao sair da plataforma.
+   */
+  surfaceNear(si, x, z, yRef, out, tol = 4) {
+    const S = this.sectors[si];
+    let best = 0, sec = si, fof = -1, plane = S.fs, bd = tol, found = false;
+    if (S.fp !== SECTOR_SKY) { const y = this.floorAt(si, x, z), dd = Math.abs(y - yRef); if (dd <= bd) { bd = dd; best = y; found = true; } }
+    for (let k = 0; k < S.fofs.length; k++) {
+      const f = this.fofs[S.fofs[k]];
+      if (f.kind !== 'solid') continue;
+      const y = this.fofTop(f, x, z), dd = Math.abs(y - yRef);
+      if (dd <= bd) { bd = dd; best = y; sec = f.ctrl; fof = S.fofs[k]; plane = typeof f.t === 'number' ? 0 : f.t; found = true; }
+    }
+    if (!found) return false;
+    out.y = best; out.sec = sec; out.fof = fof;
+    if (plane) {
+      const a = plane[0], b = plane[1], l = Math.hypot(a, b, 1);
+      out.nx = -a / l; out.ny = 1 / l; out.nz = -b / l;
+    } else { out.nx = 0; out.ny = 1; out.nz = 0; }
+    return true;
+  }
+
   /** Superficie sob (x,z) para um carro na altura y (localiza o setor). */
   groundAt(x, z, y, out = { y: 0, sec: 0, fof: -1, nx: 0, ny: 1, nz: 0 }) {
     const si = this.locate(x, z);
@@ -167,12 +190,29 @@ export class MapWorld {
       let block = l[6] < 0 || l[7] < 0 || (l[4] & 1) !== 0;
       if (!block) {
         const cross = ex * (z - l[1]) - ez * (x - l[0]);
-        const near = cross > 0 ? l[6] : l[7];
-        block = !this.surfaceIn(near === l[6] ? l[7] : l[6], px, pz, y, tmp);
+        const near = cross > 0 ? l[6] : l[7], far = near === l[6] ? l[7] : l[6];
+        this.surfaceIn(near, px, pz, y, tmp);
+        block = !this.surfaceIn(far, px, pz, Math.max(y, tmp.y), tmp);
       }
       if (block) { m = dist; out.nx = dist > 1e-6 ? (px - x) / dist : 0; out.nz = dist > 1e-6 ? (pz - z) / dist : 0; }
     });
     return m;
+  }
+
+  /**
+   * O ponto (x,z,y) esta no ou acima de um TETO (com folga m)? Teto do setor (se nao e ceu aberto) ou base de piso 3D solido que fica
+   * acima de `yRef` (a altura do carro/alvo): so o que cobre o alvo conta. Usado pela camera para nunca ficar acima do teto.
+   */
+  solidAt(x, z, y, m = 1, yRef = y) {
+    const si = this.locate(x, z), S = this.sectors[si];
+    if (S.cp !== SECTOR_SKY && y > this.ceilAt(si, x, z) - m * 0.5) return true;
+    for (let k = 0; k < S.fofs.length; k++) {
+      const f = this.fofs[S.fofs[k]];
+      if (f.kind !== 'solid') continue;
+      const bot = this.fofBottom(f, x, z);
+      if (bot > yRef + 1 && y > bot - m * 0.3) return true;
+    }
+    return false;
   }
 
   /** O segmento cruza uma parede de verdade (linha de um lado ou IMPASSIVEL)? Ignora degraus/buracos (usado por saltos). */

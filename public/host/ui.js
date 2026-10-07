@@ -79,28 +79,56 @@ export class UI {
       <button class="btn" data-nav="ok">CONFIRMAR</button></div>`;
   }
 
-  tracks(list, sel) {
-    this.screen.innerHTML = `<div class="scr"><h2>Escolha o circuito</h2>
-      <div class="cards">${list.map((c, i) => `<div class="card ${i === sel ? 'sel' : ''} ${c.locked ? 'lock' : ''}" data-nav="pick" data-i="${i}"><h3>${c.icon} ${c.name}</h3><p>${c.desc}</p></div>`).join('')}</div>
-      <div class="hint"><b>◀ ▶</b> escolher · <b>OK</b> largar · <b>VOLTAR</b> copas</div>
-      <button class="btn" data-nav="ok">LARGAR!</button></div>`;
+  /** Seletor de pistas: grade com miniatura que rola; o rodape (info, campeonato, LARGAR) fica sempre na tela. */
+  tracks(list, sel, champLen = 1) {
+    const cur = list[sel];
+    const fallback = (icon) => 'data:image/svg+xml;utf8,' + encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 120"><text x="100" y="76" font-size="52" text-anchor="middle">${icon || '?'}</text></svg>`);
+    const card = (c, i) => `<div class="tcard ${i === sel ? 'sel' : ''} ${c.locked ? 'lock' : ''}" data-nav="pick" data-i="${i}"><img src="${esc(c.thumb || fallback(c.icon))}" alt="" loading="lazy"><div class="tn">${c.icon} ${esc(c.name)}</div><div class="ts">${esc(c.locked ? 'Em breve' : c.subtitle || (c.def ? 'Circuito próprio' : ''))}</div></div>`;
+    this.screen.innerHTML = `<div class="scr tracks"><h2>Escolha o circuito</h2>
+      <div class="tgrid">${list.map(card).join('')}</div>
+      <div class="tinfo"><b>${cur.icon} ${esc(cur.name)}</b> — ${esc(cur.desc)}</div>
+      <div class="tfoot">
+        ${cur.race ? `<span class="hint">Campeonato (<b>▲▼</b>): <button class="btn" style="font-size:15px;padding:5px 14px" data-nav="up">${champLen} ${champLen > 1 ? 'pistas' : 'pista'} ▸</button></span>` : ''}
+        <span class="hint"><b>◀ ▶</b> escolher · <b>OK</b> largar · <b>VOLTAR</b> copas</span>
+        <button class="btn" data-nav="ok">LARGAR!</button>
+      </div></div>`;
+    this.screen.querySelector('.tcard.sel')?.scrollIntoView({ block: 'nearest' });
   }
 
   pause() {
     this.screen.innerHTML = `<div class="scr clear"><h2 style="font-size:60px">PAUSADO</h2><button class="btn" data-nav="ok">CONTINUAR</button><button class="btn" data-nav="back" style="background:#ff6b6b;box-shadow:0 6px 0 #a33">SAIR DA PARTIDA</button></div>`;
   }
 
+  /** Fim de uma corrida: colocacao, tempo e pontos; com campeonato, a classificacao acumulada e o botao da proxima pista. */
+  raceResults({ race, total, trackName, round, rounds, last }) {
+    const medal = (p) => (p === 1 ? '🏆' : p + 'º');
+    const raceRows = race.map((r) => `<tr class="${r.place === 1 ? 'first' : ''}" style="--c:${COLORS[r.color].hex}"><td>${medal(r.place)}</td><td><span class="dot"></span>${esc(r.name)}</td><td>${esc(r.time)}</td><td>+${r.points}</td></tr>`).join('');
+    const totRows = total ? total.map((r) => `<tr class="${r.place === 1 ? 'first' : ''}" style="--c:${COLORS[r.color].hex}"><td>${medal(r.place)}</td><td><span class="dot"></span>${esc(r.name)}</td><td>${r.points} pts</td></tr>`).join('') : '';
+    const champion = total && last ? total[0] : null;
+    const title = champion ? `🏆 ${champion.name} é o campeão!` : esc(trackName || 'Fim da corrida');
+    const sub = rounds > 1 ? `Pista ${round} de ${rounds}${last ? ' — fim do campeonato' : ''}` : 'Fim da corrida';
+    this.screen.innerHTML = `<div class="scr"><div class="logo" style="font-size:min(7vw,11vh,64px)">${title}</div>
+      <div class="hint">${sub}</div>
+      <div class="tables"><div><h3>${esc(trackName)}</h3><table class="table">${raceRows}</table></div>
+      ${total ? `<div><h3>Classificação geral</h3><table class="table">${totRows}</table></div>` : ''}</div>
+      <button class="btn" data-nav="ok">${last ? 'VOLTAR AO LOBBY' : 'PRÓXIMA PISTA ▶'}</button>
+      ${last ? '' : '<button class="btn btn2" data-nav="back" style="margin:0">SAIR PARA O LOBBY</button>'}</div>`;
+  }
+
   results(rows, title, reason) {
     const body = rows.map((r, i) => `<tr class="${i === 0 ? 'first' : ''}" style="--c:${COLORS[r.color].hex}"><td>${i === 0 ? '🏆' : i + 1 + 'º'}</td><td><span class="dot"></span>${esc(r.name)}</td><td>${r.points} pts</td></tr>`).join('');
     this.screen.innerHTML = `<div class="scr"><div class="logo" style="font-size:min(9vw,84px)">${esc(title)}</div>
-      <div class="hint">${reason === 'points' ? 'Chegou ao máximo de pontos!' : 'Fim das 3 voltas — vence quem tem mais pontos.'}</div>
+      <div class="hint">${reason === 'points' ? 'Chegou ao máximo de pontos!' : 'Fim da corrida — vence quem tem mais pontos.'}</div>
       <table class="table">${body}</table><button class="btn" data-nav="ok">VOLTAR AO LOBBY</button></div>`;
   }
 
   // ---------- HUD ----------
   initHud(game, names) {
     this.vpRoot = null; this.vpEls = null; this.vpKey = '';
-    this.hud.innerHTML = '<div class="cards"></div><div class="lap"><b>LAP <span class="lapn">1/3</span></b><small class="info"></small></div><div class="kill"></div>';
+    this.laps = game.track.def.laps ?? 3;
+    this.race = game.mode === 'race';
+    this.hud.classList.toggle('race', this.race);
+    this.hud.innerHTML = `<div class="cards"></div><div class="lap"><b>LAP <span class="lapn">1/${this.laps}</span></b><small class="info"></small></div><div class="kill"></div>`;
     this.chips.clear();
     const top = this.hud.querySelector('.cards');
     const GLYPH = ['▲', '●', '■', '◆', '★', '✚', '⬢', '♥'];
@@ -115,7 +143,7 @@ export class UI {
     }
     this.info = this.hud.querySelector('.info');
     this.killEl = this.hud.querySelector('.kill');
-    for (const e of this.labelEls.values()) e.remove();
+    for (const e of this.labelEls.values()) e?.remove();
     for (const e of this.dangerEls.values()) e.remove();
     this.labelEls.clear();
     this.dangerEls.clear();
@@ -142,6 +170,7 @@ export class UI {
 
   /** Colocacao: vivos por progresso; mortos por ordem inversa de morte. */
   order(game) {
+    if (game.mode === 'race') return game.raceOrder().map((c) => c.id);
     const alive = game.ranking().map((c) => c.id);
     const dead = game.deaths.slice().reverse().filter((id) => !alive.includes(id));
     const order = [...alive, ...dead];
@@ -168,10 +197,13 @@ export class UI {
       const ic = c.alive && c.item ? c.item : '';
       if (ch.itKind !== ic) { ch.itKind = ic; if (ic === 'mine') ch.it.innerHTML = '<span class="mine-ico"></span>'; else ch.it.textContent = ic ? ITEM_ICON[ic] : ''; }
     }
-    const lead = game.ranking()[0];
-    const lap = lead ? Math.min(game.lapOf(lead), 3) : 1;
-    this.hud.querySelector('.lapn').textContent = `${lap}/3`;
-    this.info.textContent = `Rodada ${game.round} · ${game.aliveCars().length} vivos`;
+    const lead = this.race ? game.raceOrder()[0] : game.ranking()[0];
+    const lap = lead ? Math.min(game.lapOf(lead), this.laps) : 1;
+    this.hud.querySelector('.lapn').textContent = `${lap}/${this.laps}`;
+    if (this.race) {
+      const t = Math.max(0, game.time || 0), m = Math.floor(t / 60);
+      this.info.textContent = `${m}:${(t - m * 60).toFixed(1).padStart(4, '0')}`;
+    } else this.info.textContent = `Rodada ${game.round} · ${game.aliveCars().length} vivos`;
   }
 
   killfeed(text, color) {
@@ -247,7 +279,7 @@ export class UI {
       const ic = car.alive && car.item ? car.item : '';
       if (e.itemKind !== ic) { e.itemKind = ic; if (ic === 'mine') e.item.innerHTML = '<span class="mine-ico"></span>'; else e.item.textContent = ic ? ITEM_ICON[ic] : ''; e.item.classList.toggle('on', !!ic); }
       const pts = game.points.get(c.id) ?? 0;
-      if (e.ptsV !== pts) { e.ptsV = pts; e.pts.textContent = '●'.repeat(pts) + '○'.repeat(Math.max(0, 10 - pts)); }
+      if (e.ptsV !== pts) { e.ptsV = pts; e.pts.textContent = '●'.repeat(pts) + '○'.repeat(Math.max(0, 20 - pts)); }
       e.warn.style.display = c.warn ? 'block' : 'none';
     }
   }

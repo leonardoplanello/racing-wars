@@ -84,7 +84,9 @@ export class Actors {
       const g = truck.group;
       v.bounce += dt * (4 + c.speed * 0.35);
       const bump = c.state === 'run' && !c.air ? Math.sin(v.bounce) * 0.04 * Math.min(1, c.speed / 20) : 0;
-      g.position.set(c.x, Math.max(-8, c.y + bump), c.z); // c.y e a altitude absoluta (a fisica garante carro acima do chao)
+      // c.y e a altitude absoluta (a fisica garante carro acima do chao). Pistas de mapa podem ter piso bem abaixo de zero (MAP56 ~ -52):
+      // so as pistas de curva fixa seguram o carro em -8 (afundando no rio)
+      g.position.set(c.x, game.track.map ? c.y + bump : Math.max(-8, c.y + bump), c.z);
       if (c.state === 'falling') {
         g.rotation.set(0, -c.h + c.spin, 0, 'YXZ');
         g.rotation.z = c.fall * 1.8;
@@ -127,7 +129,7 @@ export class Actors {
       this.root.add(g);
       return g;
     }, (g, m) => {
-      g.position.set(m.x, track.elevAt(track.nearest(m.x, m.z, -1, this._n || (this._n = track.newNear())).s) + 0.55, m.z);
+      g.position.set(m.x, m.y + 0.55, m.z);
       g.getObjectByName('led').visible = Math.floor(time * 4) % 2 === 0;
     }, (g) => this.root.remove(g));
     // rastro do nitro: fogo no chao que tremula e apaga no fim

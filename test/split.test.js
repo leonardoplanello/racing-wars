@@ -120,3 +120,17 @@ test('KartCamera: forward e unitario e aponta para baixo', () => {
   near(Math.hypot(f.x, f.y, f.z), 1, 1e-9);
   assert.ok(f.y < 0, 'olha para baixo');
 });
+
+test('KartCamera: objeto entre o kart e a camera aproxima a camera (nao atravessa) e ela volta quando livre', () => {
+  const wall = { x: -8, z: 0, r: 1, top: 30 };
+  let solid = true;
+  const track = { scenery: { query: () => (solid ? [wall] : []) } };
+  const c = new KartCamera();
+  const kart = { x: 0, y: 0, z: 0, h: 0, vx: 0, vz: 0, speed: 0 };
+  for (let i = 0; i < 120; i++) c.update(1 / 60, kart, { track });
+  assert.ok(c.x > wall.x + wall.r, `camera dentro do objeto: x=${c.x}`);
+  assert.ok(c.dFrac < 0.6, 'deveria ter encurtado: ' + c.dFrac);
+  solid = false;
+  for (let i = 0; i < 600; i++) c.update(1 / 60, kart, { track });
+  assert.ok(c.dFrac > 0.95, 'deveria voltar ao normal: ' + c.dFrac);
+});

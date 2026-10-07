@@ -3,7 +3,7 @@ import { ITEMS } from '../shared/protocol.js';
 import { CAR, HULL, hullPos, impulseCar } from './car.js';
 
 // parametros gerais dos poderes (editaveis no F4). speedScale multiplica a velocidade de missil, onda whomp e morteiro
-export const POWER = { boxRadius: 2.3, boxRespawn: 6, mineRadius: 1.0, mineTouch: 0.4, speedScale: 1 };
+export const POWER = { boxRadius: 2.3, boxRespawn: 6, mineRadius: 1.0, mineTouch: 0.4, mineReachY: 2.2, speedScale: 1 };
 export const MISSILE = { speed: 90, life: 4, hit: 1.6, blast: 3.2 };
 // rastro do nitro: segmentos de fogo que explodem quem passar (menos o dono)
 // curto e colado no carro: ~0,3 s de fogo (uns 15 u a 52 u/s)
@@ -152,7 +152,11 @@ export class Items {
       m.age += dt;
       for (const c of cars) {
         if (!c.alive || c.state === 'falling') continue;
-        if (c.id === m.owner && m.age < 0.9) continue;
+        if (c.id === m.owner && !m.armed) { // a mina nasce no carro: o dono so a aciona depois de sair de cima dela
+          if (hullDist(c, m.x, m.z) > POWER.mineRadius + 0.3) m.armed = true;
+          continue;
+        }
+        if (Math.abs(c.y - m.y) > POWER.mineReachY) continue; // mina no ar: so pega quem passa na mesma altura
         if (hullDist(c, m.x, m.z) < POWER.mineRadius) {
           this.explode(game, m.x, m.z, 'mine', 2.6, m.owner, c);
           this.mines.splice(i, 1);
@@ -329,7 +333,8 @@ export class Items {
         if (o === car || !o.alive || o.state === 'falling' || Math.abs(o.y - car.y) > 2) continue;
         if (rearGap(car, o) < POWER.mineTouch) { this.explode(game, o.x, o.z, 'mine', 2.6, car.id, o); touched = true; }
       }
-      if (!touched) this.mines.push({ x: car.x - fx * 3, z: car.z - fz * 3, owner: car.id, age: 0 });
+      // fica parada exatamente onde foi ativada, inclusive no ar
+      if (!touched) this.mines.push({ x: car.x, y: car.y, z: car.z, owner: car.id, age: 0 });
     } else if (item === 'missile') {
       this.missiles.push({
         id: this.nextId++, x: car.x + fx * 2.6, z: car.z + fz * 2.6, h: car.h,

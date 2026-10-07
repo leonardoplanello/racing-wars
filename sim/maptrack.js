@@ -26,8 +26,10 @@ export function buildMapTrack(d) {
   const world = new MapWorld(d);
   const N = track.N;
   // arrays por amostra a partir dos da linha central (mesma ordem, mesmo comprimento aproximado)
+  track.AIR = new Uint8Array(N); // 1 = trecho de salto da rota (a IA mantem a velocidade e o rumo)
   for (let i = 0; i < N; i++) {
     const f = (i / N) * n, a = Math.floor(f) % n, b = (a + 1) % n, t = f - Math.floor(f);
+    track.AIR[i] = c.air[a] || c.air[b] ? 1 : 0;
     track.HW[i] = Math.max(2, c.hw[a] + (c.hw[b] - c.hw[a]) * t);
     track.ELEV[i] = c.y[a] + (c.y[b] - c.y[a]) * t;
   }

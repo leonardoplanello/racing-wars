@@ -15,7 +15,7 @@ export const CATCHUP = { from: -0.3, to: -0.8 };
 
 export const RULES = {
   startPoints: 5,
-  maxPoints: 10,
+  maxPoints: 20,
   laps: 3,
   countdown: 3,
   cutGrace: 1.0, // segundos apos o GO sem corte de camera
@@ -28,7 +28,17 @@ export const RULES = {
   lostTime: 3.5, // corrida: longe da rota por tanto tempo renasce
   shieldTime: 2.5, // corrida: invulnerabilidade apos renascer
   gridRowGap: 7.5,
+  watchTime: 6, // corrida: janela do vigia de progresso (s)
+  watchDist: 8, // ...e quanto o carro precisa avancar nela (u)
+  safeKeep: 6, // pontos seguros guardados por carro
+  respawnLoop: 2.5, // renasceu e caiu em menos disso: recua o ponto seguro
+  skipNear: 40, // corrida: travar de novo a menos disso (progresso) do ultimo travamento = pula o trecho
+  skipStep: 24, // ...avancando isso (u) por repeticao
+  skipMax: 96,
+  cameraSnapDist: 90, // corrida: salto do alvo da camera (respawn) acima disso = snap
   gridBehind: 10, // "um pouco antes" de onde o sobrevivente ficou
+  regroupCooldown: 4, // corrida: minimo apos o GO para um novo reinicio geral (s)
+  regroupAhead: 8, // corrida: o reinicio geral poe a frente da grade tanto a frente do lider (u), se o chao ali for vazio avanca mais
 };
 
 /** Posicao do i-esimo carro na grade: distancia atras da frente e lado (-1/+1). */
@@ -72,6 +82,7 @@ export class Game {
     this.points = new Map(this.cars.map((c) => [c.id, this.mode === 'race' ? 0 : RULES.startPoints]));
     this.items = new Items(this.track, this.cup, this.rng);
     this.camera = new ChaseCamera(opts.aspect || 16 / 9);
+    this.camera.track = this.track;
     this.events = [];
     this.nextWheel = 0;
     this.wheels = []; // pneus soltos pelas explosoes (corpos fisicos ate o proximo spawn)
@@ -86,6 +97,8 @@ export class Game {
     this.winner = null;
     this.endReason = null;
     this.countN = RULES.countdown;
+    this.regrouping = false; // a contagem em curso e um reinicio geral (nao zera o tempo da corrida)
+    this.sinceGo = 0; // segundos desde o ultimo GO
     // modo debug (so o host liga): corrida infinita, sem corte, carros imortais
     this.debug = { infinite: false, noCut: false };
     this.startRound(-4);
@@ -128,14 +141,8 @@ export class Game {
   }
 
   frameCamera(snap = false) {
-    if (this.mode === 'race') {
-      // corrida: a camera compartilhada so enquadra o lider (ninguem e cortado)
-      const lead = this.cars.filter((c) => c.state !== 'dead' && c.state !== 'falling').sort((a, b) => b.progress - a.progress)[0] || this.cars[0];
-      this.camera.fast = 1;
-      this.camera.computeTarget([lead], this.track);
-      if (snap) this.camera.snap();
-      return;
-    }
+    // corrida e sobrevivencia usam a mesma camera de sempre: enquadra o pelotao (media dos carros vivos, zoom ate o maximo); quem
+    // fica para tras e sai do quadro e cortado (o lider nunca)
     const alive = this.aliveCars().filter((c) => c.state !== 'falling'); // quem despenca nao puxa a camera
     this.camera.fast = 1;
     this.camera.computeTarget(alive.length ? alive : this.cars, this.track);
@@ -351,7 +358,9 @@ export class Game {
     this.frameCamera();
     if (this.timer <= 0) {
       this.state = 'RACING';
-      this.time = 0;
+      if (!this.regrouping) this.time = 0;
+      this.regrouping = false;
+      this.sinceGo = 0;
       for (const c of this.cars) { c.locked = false; c.state = 'run'; }
       this.events.push({ type: 'go' });
     }
@@ -424,6 +433,7 @@ export class Game {
 
   stepRace(dt) {
     this.time += dt;
+    this.updateCatchup(dt);
     this.stepWheels(dt);
     for (const c of this.cars) {
       if (c.wantFire) {
@@ -439,41 +449,165 @@ export class Game {
     }
     this.items.update(dt, this);
     this.frameCamera();
+    this.sinceGo += dt;
+    // sair da area da camera explode o carro (o lider nunca e cortado)
+    if (this.sinceGo > RULES.cutGrace && !this.debug.noCut) {
+      const lead = this.leaderId();
+      for (const c of this.cars) {
+        if (!c.alive || c.finished || c.id === lead || c.state === 'falling' || !this.camera.isCut(c.x, c.z, c.y)) continue;
+        this.explodeCar(c, 'cut');
+      }
+    }
     this.raceFinish();
+    if (this.state === 'RACING' && this.regroupDue()) this.regroup();
   }
 
-  /** Corrida: guarda o ultimo ponto seguro de cada carro e o faz renascer quando cai, explode, fica preso ou se perde. */
+  /** Corrida: carro preso/perdido explode (e fica de fora ate o reinicio geral). */
+  explodeStuck(c) {
+    c.shield = 0;
+    this.explodeCar(c, 'stuck');
+    c.watchT = 0; c.watchP = c.progress; c.stuckT = c.lostT = 0;
+  }
+
+  /** Corrida: sobrou um so carro (os outros explodiram/cairam) e as carcacas ja assentaram = reinicio geral com semaforo. */
+  regroupDue() {
+    if (this.sinceGo < RULES.regroupCooldown) return false;
+    const racers = this.cars.filter((c) => !c.finished);
+    if (racers.length < 2 || racers.filter((c) => c.alive).length > 1) return false;
+    return racers.every((c) => c.alive || (c.deadT || 0) > RULES.respawnAfter);
+  }
+
+  /**
+   * Reinicio geral: todos os carros voltam juntos para uma grade na frente do lider e o semaforo conta de novo.
+   * Mantem voltas/progresso (o tempo da corrida nao zera).
+   */
+  regroup() {
+    const racers = this.cars.filter((c) => !c.finished);
+    if (!racers.length) return;
+    const ok = racers.filter((c) => c.alive);
+    const pool = ok.length ? ok : racers;
+    const ref = pool.reduce((m, c) => (c.progress > m.progress ? c : m));
+    // reinicio repetido no mesmo trecho: nao adianta pôr a grade no mesmo lugar; avanca mais a cada repeticao e pula o obstaculo
+    this.regroupRep = this.lastRegroupP !== undefined && Math.abs(ref.progress - this.lastRegroupP) < RULES.skipNear ? (this.regroupRep || 0) + 1 : 0;
+    this.lastRegroupP = ref.progress;
+    let front = ref.progress + RULES.regroupAhead + (this.regroupRep >= 2 ? Math.min(RULES.skipMax, RULES.skipStep * (this.regroupRep - 1)) : 0);
+    for (let k = 0; k < 6; k++) { // frente da grade em chao de verdade
+      const q = this.track.pointAt(front);
+      if (this.groundOk(q.x, q.z, this.track.elevAt(front))) break;
+      front += 8;
+    }
+    const order = racers.slice().sort((a, b) => b.progress - a.progress);
+    order.forEach((c, i) => {
+      const slot = gridSlot(i);
+      placeCar(c, this.track, front - slot.back, slot.side * this.track.halfWidth * 0.36);
+      c.hidden = false;
+      c.wantFire = false;
+      c.shield = RULES.shieldTime;
+      c.deadT = c.stuckT = c.lostT = c.safeT = 0;
+      c.watchT = 0; c.watchP = c.progress;
+      c.safes = [];
+      c.respawns = (c.respawns || 0) + 1;
+      this.events.push({ type: 'respawn', car: c.id, x: c.x, z: c.z, cause: 'regroup' });
+    });
+    this.wheels.length = 0;
+    this.state = 'COUNTDOWN';
+    this.regrouping = true;
+    this.timer = RULES.countdown;
+    this.countN = RULES.countdown;
+    this.events.push({ type: 'countdown', n: this.countN });
+    this.frameCamera(true);
+  }
+
+  /** O ponto (x,z,y) e chao de verdade (nao vazio nem poco de morte)? Pistas sem mapa sempre sao. */
+  groundOk(x, z, y) {
+    const w = this.track.map;
+    if (!w) return true;
+    const g = w.groundAt(x, z, y + 1, this._gk || (this._gk = { y: 0, sec: 0, fof: -1, nx: 0, ny: 1, nz: 0 }));
+    if (w.isVoid(g.si) && g.fof < 0) return false;
+    w.surfaceInfo(g.sec, this._ik || (this._ik = { off: 0, boost: false, finish: false, death: false }));
+    return !this._ik.death;
+  }
+
+  /** Corrida: guarda os ultimos pontos seguros de cada carro e o faz renascer quando cai, explode, fica preso ou se perde. */
   raceKeep(c, dt) {
     if (c.shield > 0) c.shield -= dt;
-    if (c.state === 'falling') { if (c.fall > 0.9) this.respawn(c, 'fall'); return; }
-    if (c.state === 'dead') { this.respawn(c, 'fall'); return; }
-    if (!c.alive) { // carcaca
-      c.deadT = (c.deadT || 0) + dt;
-      if (c.deadT > RULES.respawnAfter) this.respawn(c, 'wreck');
-      return;
+    if (c.finished) return;
+    if (!c.alive) { c.deadT = (c.deadT || 0) + dt; return; } // carcaca/caiu: fica de fora ate o reinicio geral
+    if (c.state === 'falling') { if (c.fall > 0.9) this.kill(c, 'fall'); return; }
+    if (!c.near || c.locked) return;
+    // vigia de progresso: nao avancar `watchDist` em `watchTime` (preso, vai-e-vem em re, encaixado numa parede) = renasce
+    if (c.watchP === undefined) { c.watchP = c.progress; c.watchT = 0; }
+    c.watchT = (c.watchT || 0) + dt;
+    if (c.watchT >= RULES.watchTime) {
+      const moved = c.progress - c.watchP;
+      c.watchT = 0; c.watchP = c.progress;
+      if (moved < RULES.watchDist) { this.explodeStuck(c); return; }
     }
-    if (c.state !== 'run' || !c.near || c.locked) return;
+    if (c.state !== 'run') return;
     const hw = this.track.hwAt(c.near.idx);
     c.safeT = (c.safeT || 0) + dt;
-    if (c.safeT > 0.5 && !c.air && Math.abs(c.near.d) < hw * 0.8 + 2 && c.speed > 3) {
-      c.safe = { progress: c.progress, d: Math.max(-hw * 0.5, Math.min(hw * 0.5, c.near.d)) };
+    if (c.safeT > 0.5) {
       c.safeT = 0;
+      const p = this.track.pointAt(c.progress);
+      const fwd = c.vx * p.tx + c.vz * p.tz > 0; // indo no sentido da pista
+      if (!c.air && (c.surf || 0) < 4 && Math.abs(c.vy || 0) <= 2 && !c.contact && c.speed > 3 && fwd && Math.abs(c.near.d) < hw * 0.8 + 2 && this.groundOk(c.x, c.z, c.y)) {
+        const list = c.safes || (c.safes = []);
+        list.push({ x: c.x, z: c.z, y: c.y, h: c.h, progress: c.progress, d: Math.max(-hw * 0.5, Math.min(hw * 0.5, c.near.d)), t: this.time });
+        if (list.length > RULES.safeKeep) list.shift();
+      }
     }
     c.stuckT = c.speed < 2 && !c.finished ? (c.stuckT || 0) + dt : 0;
     c.lostT = Math.abs(c.near.d) > hw + 30 ? (c.lostT || 0) + dt : 0;
-    if (c.stuckT > RULES.stuckTime || c.lostT > RULES.lostTime) this.respawn(c, 'stuck');
+    if (c.stuckT > RULES.stuckTime || c.lostT > RULES.lostTime) this.explodeStuck(c);
   }
 
-  /** Renasce o carro na pista, no ultimo ponto seguro, com um pouco de velocidade e invulneravel por alguns segundos. */
+  /**
+   * Renasce o carro no ultimo ponto seguro REAL (x, z, y e rumo de onde ele estava), invulneravel por alguns segundos. Se renasce e
+   * cai de novo logo, recua para um ponto mais antigo; pontos que viraram vazio sao descartados; evita nascer em cima de outro carro.
+   */
   respawn(c, cause) {
-    const safe = c.safe || { progress: Math.max(c.progress - 6, -3), d: 0 };
-    placeCar(c, this.track, safe.progress - 1, safe.d);
+    const list = c.safes || (c.safes = []);
+    // caiu de novo logo depois de renascer: o ponto nao presta, recua
+    if (c.lastRespawnT !== undefined && this.time - c.lastRespawnT < RULES.respawnLoop && list.length > 1) list.pop();
+    c.lastRespawnT = this.time;
+    let at = null, prog = Math.max(c.progress - 6, -3), d = 0;
+    // travou de novo no mesmo trecho: nao adianta voltar ao mesmo ponto; avanca pela linha central e pula o obstaculo
+    let skip = 0;
+    if (cause !== 'wreck') {
+      c.stuckRepeat = c.lastStuckP !== undefined && Math.abs(c.progress - c.lastStuckP) < RULES.skipNear ? (c.stuckRepeat || 0) + 1 : 0;
+      c.lastStuckP = c.progress;
+      if (c.stuckRepeat >= 1) skip = Math.min(RULES.skipMax, RULES.skipStep * c.stuckRepeat);
+    }
+    if (skip) {
+      for (let k = 0; k < 4 && skip > 0; k++, skip -= RULES.skipStep / 2) {
+        const q = this.track.pointAt(c.progress + skip), y = this.track.elevAt(c.progress + skip);
+        if (this.groundOk(q.x, q.z, y)) { prog = c.progress + skip; d = 0; at = null; list.length = 0; skip = -1; break; }
+      }
+      if (skip !== -1) skip = 0;
+    }
+    while (list.length) {
+      const sp = list[list.length - 1];
+      if (this.groundOk(sp.x, sp.z, sp.y)) { at = { x: sp.x, z: sp.z, y: sp.y + 0.15, h: sp.h }; prog = sp.progress; d = sp.d; break; }
+      list.pop();
+    }
+    // sem ponto seguro: a linha central (validada na geracao) um pouco atras do progresso do carro
+    // nao nascer em cima de outro carro: recua ao longo do rumo
+    if (at) {
+      const hx = Math.cos(at.h), hz = Math.sin(at.h);
+      for (let k = 0; k < 6; k++) {
+        const x = at.x - hx * k * 5, z = at.z - hz * k * 5;
+        if (!this.cars.some((o) => o !== c && o.alive && Math.hypot(o.x - x, o.z - z) < 4.5)) { at = { ...at, x, z }; break; }
+      }
+    }
+    placeCar(c, this.track, at ? prog : prog - 1, d, at);
     c.hidden = false;
     c.locked = false;
     c.state = 'run';
     c.vx = Math.cos(c.h) * 12; c.vz = Math.sin(c.h) * 12;
     c.shield = RULES.shieldTime;
     c.deadT = c.stuckT = c.lostT = c.safeT = 0;
+    c.watchT = 0; c.watchP = c.progress;
+    c.respawns = (c.respawns || 0) + 1;
     c.wantFire = false;
     this.events.push({ type: 'respawn', car: c.id, x: c.x, z: c.z, cause });
   }

@@ -14,7 +14,7 @@ game.debug.infinite = true; game.debug.noCut = true;
 const rng = makeRng(7); const brains = new Map(game.cars.map((c) => [c.id, makeBrain(rng, 0.85)]));
 const last = new Map();
 for (let t = 0; t < Number(secs); t += 1 / 60) {
-  for (const c of game.cars) if (c.alive && c.near) { const r = think(brains.get(c.id), c, game, 1 / 60); game.setInput(c.id, r.steer, r.fire); }
+  for (const c of game.cars) if (c.alive && c.near) { const r = think(brains.get(c.id), c, game, 1 / 60); game.setInput(c.id, r.steer, r.fire, r.rev); }
   game.update(1 / 60);
   game.drainEvents();
   if (Math.abs(t - Math.round(t)) < 1 / 120 && t > 20) {

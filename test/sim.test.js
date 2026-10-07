@@ -345,9 +345,9 @@ test('partida: sobrevivente e mostrado 0,5 s antes da nova contagem', () => {
   assert.equal(game.aliveCars().length, 3);
 });
 
-test('partida: regra de fim por 10 pontos', () => {
+test('partida: regra de fim por 20 pontos', () => {
   const game = new Game(players(2), { track, cup: 'fast', seed: 9 });
-  game.points.set(0, 9);
+  game.points.set(0, 19);
   game.state = 'RACING';
   for (const c of game.cars) { c.locked = false; c.state = 'run'; }
   game.time = 5;
@@ -950,7 +950,7 @@ test('gelo: carro congelado desliza em linha reta, sem esterco nem tracao, e dep
   const game = raceStart(2);
   const [a] = game.cars;
   const p = track.pointAt(0.55 * track.length), h = Math.atan2(p.tz, p.tx);
-  relocate(a, track, p.x, p.z); a.h = h; a.y = groundY(a); a.vx = Math.cos(h) * 30; a.vz = Math.sin(h) * 30;
+  relocate(a, track, p.x, p.z); a.h = h; a.y = groundY(a); a.vx = Math.cos(h) * CAR.cruise; a.vz = Math.sin(h) * CAR.cruise;
   relocate(game.cars[1], track, p.x + p.nx * 80, p.z + p.nz * 80);
   game.freezeCar(a, 2);
   const x0 = a.x, z0 = a.z;

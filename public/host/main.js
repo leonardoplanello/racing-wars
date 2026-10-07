@@ -4,6 +4,8 @@ import { buildTrack } from '/sim/track.js';
 import { Game } from '/sim/game.js';
 import { CAMERA, KartCamera, kartFovV } from '/sim/camera.js';
 import { splitRects } from '/shared/layout.js';
+import { thumbUri } from '/shared/thumb.js';
+import { Championship, playlistFrom } from '/sim/champ.js';
 import { CAR, HULL } from '/sim/car.js';
 import { makeBrain, think, DIFFICULTY_LABEL, DIFFICULTY_ORDER } from '/sim/ai.js';
 import { makeRng } from '/sim/rng.js';
@@ -15,7 +17,7 @@ import { GameAudio } from './audio.js?v=2';
 import { Keyboard } from './kbd.js';
 import { createScene } from './render/scene.js';
 import { buildWorld } from './render/world.js';
-import { buildMapWorld } from './render/mapworld.js';
+import { buildMapWorld, preloadMapAssets } from './render/mapworld.js';
 import { buildMapTrack } from '/sim/maptrack.js';
 import { Actors } from './render/cars.js';
 import { FX } from './render/fx.js';
@@ -39,6 +41,9 @@ const TRACKS = [
   { icon: '🌽', name: 'Farm Jump', desc: 'Em breve.', locked: true },
 ];
 
+for (const t of TRACKS) if (t.def) { t.thumb = thumbUri(t.def.points); t.padThumb = t.thumb; }
+const CHAMP_LENS = [1, 3, 5]; // pistas por campeonato (corrida)
+
 // Pistas importadas do SRB2Kart (opcionais): tools/srb2kart/build.js gera public/tracks/srb2kart/index.json a partir do jogo instalado.
 const REMOTE_BASE = (document.baseURI.includes('/host/') ? '../' : '') + 'tracks/srb2kart/';
 async function loadRemoteTracks() {
@@ -46,9 +51,15 @@ async function loadRemoteTracks() {
     const r = await fetch(REMOTE_BASE + 'index.json');
     if (!r.ok) return;
     const idx = await r.json();
-    const list = idx.tracks.filter((t) => t.ok).map((t) => ({ id: t.id, icon: '🦔', name: t.name, desc: `${t.subtitle || 'SRB2Kart'} · ${t.laps} voltas · ~${Math.round(t.length / 34 / 60 * 10) / 10} min`, remote: REMOTE_BASE + t.file }));
-    TRACKS.splice(2, 0, ...list);
     const want = qs.get('track');
+    // so as pistas que os bots completam (playable); com ?track=<id> a pista pedida entra mesmo assim (teste)
+    const list = idx.tracks.filter((t) => t.ok && (t.playable || t.id === want)).map((t) => ({
+      id: t.id, icon: '🦔', name: t.name, race: true, laps: t.laps, subtitle: t.subtitle || 'SRB2Kart',
+      desc: `${t.subtitle || 'SRB2Kart'} · ${t.laps} voltas · ~${Math.round(t.length / 34 / 60 * 10) / 10} min`,
+      remote: REMOTE_BASE + t.file,
+      thumb: t.thumb ? REMOTE_BASE + t.thumb : '', padThumb: t.thumb ? '../tracks/srb2kart/' + t.thumb : '',
+    }));
+    TRACKS.splice(2, 0, ...list);
     if (want) { const i = TRACKS.findIndex((t) => t.id === want); if (i >= 0) S.trackIdx = i; }
     if (S.phase === 'tracks') refresh();
   } catch {}
@@ -100,6 +111,9 @@ const S = {
   paused: false,
   names: new Map(),
   resultsTimer: 0,
+  champLen: 1, // pistas do proximo campeonato (CHAMP_LENS)
+  champ: null, // Championship em andamento (so corridas)
+  preload: null, // { id, p } proxima pista ja baixando
   camMode: loadCamMode(), // 'classic' (camera compartilhada de sempre) | 'split' (tela dividida, camera de kart por jogador)
   kcams: new Map(), // id -> KartCamera (so visual)
 };
@@ -205,8 +219,19 @@ function phoneView(id) {
     if (c) return { ...base, mode: S.paused && isMaster ? 'menu' : c.alive ? 'drive' : 'dead', item: c.item ? ITEM_LABEL[c.item] + '|' + c.item : null, pts: S.game.points.get(id), title: S.paused ? 'Jogo pausado' : '' };
     return { ...base, mode: 'wait', title: 'Aguardando a próxima partida' };
   }
-  const titles = { splash: 'Clique na tela principal', lobby: 'Lobby: ◀ ▶ bots · OK escolher copa', cups: 'Escolha a copa', tracks: 'Escolha o circuito', results: 'Fim de jogo: OK volta ao lobby' };
-  return { ...base, mode: isMaster ? 'menu' : 'wait', title: titles[S.phase] || '' };
+  const titles = { splash: 'Clique na tela principal', lobby: 'Lobby: ◀ ▶ bots · ▲▼ dificuldade · OK escolher copa', cups: 'Escolha a copa', tracks: 'Escolha o circuito', results: 'Fim de jogo: OK volta ao lobby' };
+  const v = { ...base, mode: isMaster ? 'menu' : 'wait', title: titles[S.phase] || '' };
+  if (S.phase === 'cups') v.info = { name: `${CUPS[S.cupIdx].icon} ${CUPS[S.cupIdx].name}`, sub: CUPS[S.cupIdx].desc };
+  else if (S.phase === 'tracks') {
+    const t = TRACKS[S.trackIdx];
+    v.title = `Circuito ${S.trackIdx + 1}/${TRACKS.length} · ◀ ▶ trocar`;
+    v.info = { name: `${t.icon} ${t.name}`, sub: t.locked ? 'Em breve' : t.subtitle || '', thumb: t.padThumb || '', extra: t.race ? `${t.laps} voltas · campeonato: ${S.champLen} ${S.champLen > 1 ? 'pistas' : 'pista'} (▲▼)` : '' };
+    v.ok = t.locked ? 'EM BREVE' : 'COMEÇAR';
+  } else if (S.phase === 'results' && S.champ) {
+    v.title = S.champ.isLast ? 'Fim do campeonato' : `Pista ${S.champ.round}/${S.champ.tracks.length} concluída`;
+    v.ok = S.champ.isLast ? 'LOBBY' : 'PRÓXIMA ▶';
+  } else if (S.phase === 'lobby') v.ok = 'COPAS ▶';
+  return v;
 }
 function syncPhones() {
   for (const d of S.devices.values()) {
@@ -255,7 +280,7 @@ function refresh() {
       ips: S.ips.length, ipIdx: S.ipIdx,
     });
   } else if (S.phase === 'cups') ui.cups(CUPS, S.cupIdx);
-  else if (S.phase === 'tracks') ui.tracks(TRACKS, S.trackIdx);
+  else if (S.phase === 'tracks') ui.tracks(TRACKS, S.trackIdx, S.champLen);
   syncPhones();
 }
 
@@ -296,6 +321,9 @@ function nav(k, idx, fromPhone = false) {
       if (k === 'left') { S.trackIdx = (S.trackIdx + TRACKS.length - 1) % TRACKS.length; refresh(); }
       else if (k === 'right') { S.trackIdx = (S.trackIdx + 1) % TRACKS.length; refresh(); }
       else if (k === 'pick') { S.trackIdx = idx; refresh(); }
+      else if (k === 'up' || k === 'down') {
+        if (TRACKS[S.trackIdx].race) { S.champLen = CHAMP_LENS[(CHAMP_LENS.indexOf(S.champLen) + (k === 'up' ? 1 : CHAMP_LENS.length - 1)) % CHAMP_LENS.length]; refresh(); }
+      }
       else if (k === 'ok') { if (!TRACKS[S.trackIdx].locked) startGame(); }
       else if (k === 'back') goto('cups');
       break;
@@ -305,7 +333,8 @@ function nav(k, idx, fromPhone = false) {
       else if (S.paused && k === 'back') quitToLobby();
       break;
     case 'results':
-      if (k === 'ok' || k === 'back') quitToLobby();
+      if (k === 'ok' && S.champ && !S.champ.isLast) nextRace();
+      else if (k === 'ok' || k === 'back') quitToLobby();
       break;
   }
   syncPhones();
@@ -324,21 +353,54 @@ kbd.onKey = (ch) => {
 };
 
 // ---------------------------------------------------------------- partida
-async function startGame() {
+/** Baixa o JSON de uma pista remota (usa a pre-carga se for a mesma). */
+async function fetchTrackData(entry) {
+  if (S.preload && S.preload.id === entry.id) { const p = S.preload.p; S.preload = null; return p; }
+  return (await fetch(entry.remote)).json();
+}
+
+/** Pre-carga da proxima pista do campeonato enquanto a atual e disputada. */
+function preloadNext() {
+  const id = S.champ && S.champ.nextTrackId;
+  const entry = id && TRACKS.find((t) => t.id === id);
+  if (!entry || !entry.remote || (S.preload && S.preload.id === id)) return;
+  const p = fetch(entry.remote).then((r) => r.json());
+  S.preload = { id, p };
+  p.then((d) => preloadMapAssets(d, REMOTE_BASE)).catch(() => { if (S.preload && S.preload.id === id) S.preload = null; });
+}
+
+/** Proxima pista do campeonato (botao PROXIMA da tela de resultados). */
+function nextRace() {
+  if (!S.champ || !S.champ.advance()) { quitToLobby(); return; }
+  const i = TRACKS.findIndex((t) => t.id === S.champ.trackId);
+  if (i >= 0) S.trackIdx = i;
+  ui.bannerClear();
+  ui.clearHud();
+  startGame({ next: true });
+}
+
+async function startGame(opts = {}) {
   if (participants().length < 2) while (participants().length < 4 && freeColor() >= 0) addBot();
   const list = participants();
   const entry = TRACKS[S.trackIdx];
   let track;
   if (entry.remote) {
     ui.banner('<div class="mid">Carregando pista…</div>');
-    try { track = buildMapTrack(await (await fetch(entry.remote)).json()); } catch (e) { ui.banner(`<div class="mid">Erro ao carregar a pista</div><div class="sub">${e.message}</div>`, 4000); return; }
+    try { track = buildMapTrack(await fetchTrackData(entry)); } catch (e) { ui.banner(`<div class="mid">Erro ao carregar a pista</div><div class="sub">${e.message}</div>`, 4000); return; }
     ui.bannerClear();
   } else {
     const def = (dbg.on && editor.trackOverride(entry.id)) || entry.def; // debug: pista editada
     track = buildTrack(def);
   }
   const cup = CUPS[S.cupIdx].id;
-  const game = new Game(list, { track, cup, seed: (Math.random() * 1e9) | 0, aspect: sc.size.aspect });
+  // pistas do SRB2Kart sao corridas (voltas, colocacao, renasce); as locais seguem na sobrevivencia
+  const mode = entry.race ? 'race' : 'survival';
+  if (!opts.next) {
+    const ids = playlistFrom(TRACKS.filter((t) => t.race).map((t) => t.id), entry.id, S.champLen);
+    S.champ = entry.race ? new Championship(ids, list.map((p) => p.id)) : null;
+    S.preload = null;
+  }
+  const game = new Game(list, { track, cup, seed: (Math.random() * 1e9) | 0, aspect: sc.size.aspect, mode });
   S.game = game;
   S.geysers = [];
   S.paused = false;
@@ -349,6 +411,7 @@ async function startGame() {
   S.brains = new Map(list.filter((p) => p.isBot).map((p) => [p.id, makeBrain(rng, null, S.difficulty)]));
   if (world) sc.scene.remove(world.group);
   sc.applyTheme(track.theme);
+  if (track.map && track.map.d.skyTex) sc.setSkyImage(`${REMOTE_BASE}tex/t_SKY${track.map.d.sky}.png`);
   world = track.map ? buildMapWorld(track, { base: REMOTE_BASE }) : buildWorld(track, quality);
   sc.scene.add(world.group);
   actors.setup(game);
@@ -360,6 +423,7 @@ async function startGame() {
   audio.setMusic(true);
   handleEvents(game.drainEvents());
   syncPhones();
+  preloadNext();
 }
 
 function quitToLobby() {
@@ -373,6 +437,8 @@ function quitToLobby() {
   debris.clear();
   fx.clearScorch();
   S.game = null;
+  S.champ = null;
+  S.preload = null;
   S.paused = false;
   for (const d of [...S.devices.values()]) if (!d.connected) S.devices.delete(d.id);
   for (const d of S.devices.values()) d.sent = '';
@@ -510,12 +576,19 @@ function handleEvents(events) {
       case 'alarm': audio.play('alarm'); vib(e.car, [70, 40, 70]); break;
       case 'fall': if (e.cause !== 'chasm') fx.splash(e.x, e.z); audio.play('fall'); break;
       case 'dead': {
-        const why = { fall: 'caiu no rio', chasm: 'caiu no precipício', cut: 'ficou para trás', mine: 'pisou numa mina', missile: 'levou um míssil', trail: 'passou no rastro do nitro', offroad: 'se perdeu no mato', pump: 'explodiu no posto' }[e.cause] || 'explodiu';
+        const why = { fall: 'caiu no rio', chasm: 'caiu no precipício', cut: 'ficou para trás', mine: 'pisou numa mina', missile: 'levou um míssil', trail: 'passou no rastro do nitro', offroad: 'se perdeu no mato', pump: 'explodiu no posto', stuck: 'ficou preso' }[e.cause] || 'explodiu';
         ui.killfeed(`${nameOf(e.car)} ${why}`, hexOf(e.car));
         if (e.cause === 'cut') audio.play('cut');
         vib(e.car, [400]);
         break;
       }
+      case 'finish': {
+        const ord = ['1º', '2º', '3º', '4º', '5º', '6º', '7º', '8º'];
+        ui.killfeed(`${nameOf(e.car)} terminou em ${ord[e.place - 1] || e.place + 'º'}`, hexOf(e.car));
+        if (S.kinds.get(e.car) !== 'bot') { audio.play('win'); vib(e.car, [80, 50, 160]); }
+        break;
+      }
+      case 'respawn': if (e.cause !== 'fall') vib(e.car, [40]); break;
       case 'roundEnd': {
         world?.gantry.off();
         const d = e.delta[e.survivor];
@@ -528,6 +601,7 @@ function handleEvents(events) {
         audio.setMusic(false);
         audio.play('fanfare');
         ui.banner(`<div class="mid" style="color:${hexOf(e.winner)}">🏆 ${nameOf(e.winner)} venceu!</div>`, 0);
+        if (g.mode === 'race' && S.champ) S.champ.addRace(e.results);
         S.resultsTimer = setTimeout(showResults, 2600);
         vib(e.winner, [100, 60, 100, 60, 400]);
         break;
@@ -536,14 +610,29 @@ function handleEvents(events) {
   }
 }
 
+function fmtTime(t) { const m = Math.floor(t / 60), s = t - m * 60; return `${m}:${s.toFixed(1).padStart(4, '0')}`; }
+
 function showResults() {
   const g = S.game;
   if (!g) return;
+  if (g.mode === 'race') { showRaceResults(g); return; }
   const rows = g.cars.map((c) => ({ color: c.color, name: nameOf(c.id), points: g.points.get(c.id), prog: c.progress, win: c.id === g.winner }));
   rows.sort((a, b) => (b.win - a.win) || (b.points - a.points) || (b.prog - a.prog));
   ui.bannerClear();
   S.phase = 'results';
   ui.results(rows, `${rows[0].name} venceu!`, g.endReason);
+  syncPhones();
+}
+
+/** Resultado de uma corrida: colocacao, tempo e pontos; com campeonato, a classificacao acumulada. */
+function showRaceResults(g) {
+  const champ = S.champ;
+  const race = g.results.map((r) => ({ color: g.carById(r.id).color, name: nameOf(r.id), place: r.place, time: r.finished && r.time != null ? fmtTime(r.time) : 'não terminou', points: r.points }));
+  const total = champ && champ.tracks.length > 1 ? champ.standings().map((r) => ({ color: g.carById(r.id).color, name: nameOf(r.id), points: r.points, place: r.place })) : null;
+  const track = TRACKS.find((t) => t.id === (champ ? champ.trackId : TRACKS[S.trackIdx].id));
+  ui.bannerClear();
+  S.phase = 'results';
+  ui.raceResults({ race, total, trackName: track ? track.name : '', round: champ ? champ.round : 1, rounds: champ ? champ.tracks.length : 1, last: !champ || champ.isLast });
   syncPhones();
 }
 
@@ -571,7 +660,7 @@ function tick(dt, now) {
         if (kind === 'bot') {
           if (c.alive && c.near) {
             const r = think(S.brains.get(c.id), c, g, dt);
-            g.setInput(c.id, r.steer, r.fire);
+            g.setInput(c.id, r.steer, r.fire, r.rev);
           }
         } else if (dbg.on && dbg.free) {
           // freecam ligada (WASD move a camera): o carro humano dirige sozinho, como um bot
@@ -579,7 +668,7 @@ function tick(dt, now) {
             let br = S.brains.get(c.id);
             if (!br) S.brains.set(c.id, (br = makeBrain(makeRng(c.id + 11), null, S.difficulty)));
             const r = think(br, c, g, dt);
-            g.setInput(c.id, r.steer, r.fire);
+            g.setInput(c.id, r.steer, r.fire, r.rev);
           }
           if (kind === 'kbd') kbd.takeFire(); else { const d = S.devices.get(c.id); if (d) d.fireQueued = false; }
         } else if (kind === 'kbd') {
@@ -660,10 +749,10 @@ function splitViews(g, dt) {
     let kc = S.kcams.get(c.id);
     if (!kc) S.kcams.set(c.id, (kc = new KartCamera()));
     if (kc.target !== tgt.id) { kc.target = tgt.id; kc.ready = false; }
-    kc.update(dt, tgt, { top: CAR.cruise });
+    kc.update(dt, tgt, { top: CAR.cruise, track: g.track });
     kc.forward(kfwd);
     const rect = lay.rects[i];
-    return { id: c.id, rect, fov: kartFovV(rect.w / rect.h, humans.length), x: kc.x, y: kc.y, z: kc.z, fx: kfwd.x, fy: kfwd.y, fz: kfwd.z, sunAt: { x: tgt.x, y: tgt.y || 0, z: tgt.z } };
+    return { id: c.id, rect, fov: kartFovV(rect.w / rect.h, humans.length), x: kc.x, y: kc.vy, z: kc.z, fx: kfwd.x, fy: kfwd.y, fz: kfwd.z, sunAt: { x: tgt.x, y: tgt.y || 0, z: tgt.z } };
   });
   return { views, spare: lay.spare };
 }
@@ -720,6 +809,8 @@ function ambient(g, dt) {
 requestAnimationFrame(frame);
 ui.splash();
 window.__rw = S; // depuracao
+window.__tracks = TRACKS;
+window.__sc = sc;
 window.__dbg = dbg;
 window.__ed = editor;
 window.__start = startGame;

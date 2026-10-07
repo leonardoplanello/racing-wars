@@ -13,6 +13,7 @@ export class Assets {
     this.patchLump = new Map(); // nome -> { wad, i } (TX_START..TX_END e P_START..P_END)
     this.flatLump = new Map(); // nome -> { wad, i } (F_START..F_END, FF_START..FF_END)
     this.defs = new Map(); // nome -> { w, h, patches: [{name,x,y}] }
+    this.anims = { f: new Map(), t: new Map() }; // ANIMDEFS: nome de qualquer quadro -> { frames: [nomes], tics, i0 }
     this.cache = new Map();
     for (const w of this.wads) {
       const pal = w.get('PLAYPAL');
@@ -25,8 +26,45 @@ export class Assets {
       if (fs >= 0 && ps > fs && w.find('F_END') < 0) for (let i = fs + 1; i < ps; i++) if (w.lumps[i].size > 0) this.flatLump.set(w.lumps[i].name, { wad: w, i });
       const t = w.get('TEXTURES');
       if (t) this.parseTextures(t.toString('latin1'));
+      const an = w.get('ANIMDEFS');
+      if (an) this.parseAnims(an.toString('latin1'), w);
     }
     if (!this.palette) throw new Error('PLAYPAL nao encontrado');
+    // sprites (S_START..S_END) do srb2.srb e do gfx.kart: nome do lump -> { wad, i }
+    this.spriteLump = new Map();
+    for (const f of ['srb2.srb', 'gfx.kart']) {
+      try { const w = Wad.open(path.join(dir, f)); for (const l of w.between('S_START', 'S_END')) if (l.size > 0) this.spriteLump.set(l.name, { wad: w, i: l.i }); } catch { /* sem o arquivo */ }
+    }
+  }
+
+  /**
+   * Sprite 'NOME' + quadro (0 = A, 26 = '0', 36 = 'a') -> { w, h, ox, oy, rgba, flip } ou null. Usa a rotacao 0 (ou a 1 / espelhada).
+   * ox/oy: deslocamento do patch (pixels a esquerda do ponto de ancora / acima dele), como no jogo.
+   */
+  sprite(name, frame) {
+    const key = 's' + name + frame;
+    if (this.cache.has(key)) return this.cache.get(key);
+    const ch = frame < 26 ? String.fromCharCode(65 + frame) : frame < 36 ? String(frame - 26) : String.fromCharCode(97 + frame - 36);
+    let hit = null, flip = false;
+    for (const rot of ['0', '1']) {
+      const n = name + ch + rot;
+      if (this.spriteLump.has(n)) { hit = this.spriteLump.get(n); break; }
+    }
+    if (!hit) { // lump com dois quadros (NOMEA2A8: o segundo e a versao espelhada)
+      for (const [n, e] of this.spriteLump) {
+        if (!n.startsWith(name) || n.length !== 10) continue;
+        if (n[4] === ch && (n[5] === '1' || n[5] === '0')) { hit = e; break; }
+        if (n[6] === ch && (n[7] === '1' || n[7] === '0')) { hit = e; flip = true; break; }
+      }
+    }
+    let out = null;
+    if (hit) {
+      const d = hit.wad.data(hit.i);
+      const pt = this.decodePatchData(d);
+      if (pt) { const t = this.toRgba(pt.w, pt.h, pt.idx); out = { ...t, ox: d.readInt16LE(4), oy: d.readInt16LE(6), flip }; }
+    }
+    this.cache.set(key, out);
+    return out;
   }
 
   parseTextures(text) {
@@ -41,11 +79,40 @@ export class Assets {
     }
   }
 
+  /**
+   * ANIMDEFS ("Flat|Texture [Optional] INICIO Range FIM Tics N"): os quadros sao os flats consecutivos no WAD (ou as texturas
+   * consecutivas na lista, ou a numeracao do nome). Cada nome de quadro aponta para o ciclo inteiro e a sua posicao nele.
+   */
+  parseAnims(text, wad) {
+    const re = /^\s*(flat|texture)\s+(?:optional\s+)?(\S+)\s+range\s+(\S+)\s+tics\s+(\d+)/gim;
+    let m;
+    while ((m = re.exec(text))) {
+      const kind = m[1].toLowerCase() === 'flat' ? 'f' : 't', a = m[2].toUpperCase(), b = m[3].toUpperCase(), tics = Number(m[4]);
+      let frames = [];
+      if (kind === 'f') {
+        const ea = this.flatLump.get(a), eb = this.flatLump.get(b);
+        if (ea && eb && ea.wad === eb.wad && eb.i >= ea.i) for (let i = ea.i; i <= eb.i; i++) if (ea.wad.lumps[i].size > 0) frames.push(ea.wad.lumps[i].name);
+      } else {
+        const names = [...this.defs.keys()], ia = names.indexOf(a), ib = names.indexOf(b);
+        if (ia >= 0 && ib >= ia) frames = names.slice(ia, ib + 1);
+      }
+      if (frames.length < 2) { // fallback: o numero final do nome (NOME1..NOME4)
+        const pa = /^(.*?)(\d+)$/.exec(a), pb = /^(.*?)(\d+)$/.exec(b);
+        if (pa && pb && pa[1] === pb[1]) { frames = []; for (let n = Number(pa[2]); n <= Number(pb[2]); n++) frames.push(pa[1] + String(n).padStart(pa[2].length, '0')); }
+      }
+      if (frames.length < 2) continue;
+      frames.forEach((f, i) => this.anims[kind].set(f, { frames, tics, i0: i }));
+    }
+  }
+
   /** Patch do jogo (colunas com posts) -> { w, h, idx: Int16Array(-1 = vazio) } */
   decodePatch(name) {
     const e = this.patchLump.get(name);
     if (!e) return null;
-    const d = e.wad.data(e.i);
+    return this.decodePatchData(e.wad.data(e.i));
+  }
+
+  decodePatchData(d) {
     if (d.length > 8 && d[0] === 0x89 && d[1] === 0x50) return null; // PNG: nao suportado aqui
     const w = d.readInt16LE(0), h = d.readInt16LE(2);
     if (w <= 0 || h <= 0 || w > 2048 || h > 2048) return null;
@@ -132,4 +199,35 @@ export function averageColor(img) {
   let r = 0, g = 0, b = 0, n = 0;
   for (let i = 0; i < img.rgba.length; i += 4) if (img.rgba[i + 3]) { r += img.rgba[i]; g += img.rgba[i + 1]; b += img.rgba[i + 2]; n++; }
   return n ? ((Math.round(r / n) << 16) | (Math.round(g / n) << 8) | Math.round(b / n)) : 0x808080;
+}
+
+/**
+ * Espalha a cor dos pixels opacos para os transparentes vizinhos (alfa continua 0). Sem isso o mipmap/filtro mistura o RGB=0 dos
+ * pixels transparentes com a borda e as grades/cercas ganham um halo escuro (e somem a distancia).
+ */
+export function bleedAlpha(img, passes = 6) {
+  const { w, h, rgba } = img;
+  for (let p = 0; p < passes; p++) {
+    const next = rgba.slice();
+    let changed = false;
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const i = (y * w + x) * 4;
+        if (rgba[i + 3]) continue;
+        let r = 0, g = 0, b = 0, n = 0;
+        for (let dy = -1; dy <= 1; dy++) {
+          for (let dx = -1; dx <= 1; dx++) {
+            const xx = x + dx, yy = y + dy;
+            if (xx < 0 || yy < 0 || xx >= w || yy >= h) continue;
+            const j = (yy * w + xx) * 4;
+            if (rgba[j + 3] || rgba[j] + rgba[j + 1] + rgba[j + 2] > 0) { r += rgba[j]; g += rgba[j + 1]; b += rgba[j + 2]; n++; }
+          }
+        }
+        if (n && (rgba[i] + rgba[i + 1] + rgba[i + 2] === 0)) { next[i] = r / n; next[i + 1] = g / n; next[i + 2] = b / n; changed = true; }
+      }
+    }
+    rgba.set(next);
+    if (!changed) break;
+  }
+  return img;
 }

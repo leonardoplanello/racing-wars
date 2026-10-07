@@ -9,8 +9,8 @@ html, body { margin: 0; height: 100%; overflow: hidden; overscroll-behavior: non
 input { width: min(320px, 90vw); font: 800 26px var(--font); padding: 12px; border-radius: 12px; border: 3px solid #ffffff30; background: #0006; color: #fff; text-align: center; text-transform: uppercase; outline: none; user-select: text; -webkit-user-select: text; }
 #name { font-size: 18px; text-transform: none; }
 input:focus { border-color: #ffd60a; }
-#go, .mrow button, .back { border: 0; border-radius: 16px; font: 900 24px var(--font); color: #221a00; background: #ffd60a; box-shadow: 0 6px 0 #a8870a; padding: 14px 40px; }
-#go:active, .mrow button:active, .back:active { transform: translateY(3px); box-shadow: 0 3px 0 #a8870a; }
+#go { border: 0; border-radius: 16px; font: 900 24px var(--font); color: #221a00; background: #ffd60a; box-shadow: 0 6px 0 #a8870a; padding: 14px 40px; }
+#go:active { transform: translateY(3px); box-shadow: 0 3px 0 #a8870a; }
 #err { color: #ff8a8a; min-height: 1.2em; font-weight: 700; }
 
 #pad { display: flex; flex-direction: column; }
@@ -28,13 +28,23 @@ input:focus { border-color: #ffd60a; }
 .arrow { flex: 1; border-radius: 22px; background: #00000030; border: 4px solid #ffffff44; display: flex; align-items: center; justify-content: center; font-size: 64px; font-weight: 900; color: #ffffffcc; text-shadow: 0 4px 0 #0006; }
 .arrow.pressed { background: #ffffff55; color: #fff; }
 #revhint { position: absolute; left: 0; right: 0; bottom: calc(6px + env(safe-area-inset-bottom)); text-align: center; font-size: 11px; font-weight: 800; letter-spacing: 2px; color: #ffffff77; pointer-events: none; }
-#menu { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 18px; padding: 20px; }
-#mtitle { font-weight: 900; font-size: 22px; text-align: center; text-shadow: 0 2px 0 #0007; padding-top: 24px; }
-.mrow { display: flex; gap: 16px; }
-.mrow button { min-width: 110px; padding: 20px 26px; font-size: 32px; }
-.mrow button.ok { min-width: 170px; background: #4dff88; box-shadow: 0 6px 0 #1e9c4f; }
-.back { background: #ff6b6b !important; box-shadow: 0 6px 0 #a33 !important; font-size: 18px !important; padding: 10px 26px !important; }
-#msg { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; font-weight: 900; font-size: 30px; text-shadow: 0 3px 0 #0007; gap: 8px; padding: 20px; }
+#menu { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1.5vh; padding: calc(4vh + env(safe-area-inset-top)) calc(12px + env(safe-area-inset-right)) calc(3vh + env(safe-area-inset-bottom)) calc(12px + env(safe-area-inset-left)); }
+#mtitle { font-weight: 900; font-size: clamp(14px, 5vh, 22px); text-align: center; text-shadow: 0 2px 0 #0007; max-width: 100%; }
+#minfo { display: flex; align-items: center; gap: 12px; max-width: 100%; min-height: 0; }
+#mthumb { height: clamp(48px, 24vh, 110px); width: auto; aspect-ratio: 5 / 3; border-radius: 12px; background: #0b0e16; border: 2px solid #ffffff40; object-fit: contain; }
+.mtx { display: flex; flex-direction: column; min-width: 0; text-align: left; }
+.mtx b { font-size: clamp(16px, 6vh, 26px); line-height: 1.1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mtx small { font-size: clamp(11px, 3.6vh, 15px); font-weight: 700; opacity: .85; }
+#mctl { display: flex; align-items: center; justify-content: center; gap: clamp(16px, 5vw, 48px); }
+.dpad { display: grid; grid-template-columns: repeat(3, auto); grid-template-areas: ". u ." "l d r"; gap: clamp(4px, 1.4vh, 10px); }
+.dpad .u { grid-area: u; } .dpad .l { grid-area: l; } .dpad .d { grid-area: d; } .dpad .r { grid-area: r; }
+.acts { display: flex; flex-direction: column; align-items: stretch; gap: clamp(6px, 2vh, 12px); }
+#menu button { border: 0; border-radius: 14px; font: 900 clamp(18px, 7vh, 30px) var(--font); color: #221a00; background: #ffd60a; box-shadow: 0 5px 0 #a8870a; }
+#menu button:active { transform: translateY(3px); box-shadow: 0 2px 0 #a8870a; }
+.dpad button { width: clamp(46px, 17vh, 76px); height: clamp(40px, 15vh, 64px); padding: 0; }
+.acts button.ok { background: #4dff88; box-shadow: 0 5px 0 #1e9c4f; padding: clamp(8px, 3vh, 18px) clamp(18px, 5vw, 34px); min-width: clamp(110px, 28vw, 190px); }
+#menu button.back { background: #ff6b6b; box-shadow: 0 5px 0 #a33; font-size: clamp(12px, 4vh, 18px); padding: clamp(6px, 2vh, 10px) 20px; }
+#msg { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; font-weight: 900; font-size: clamp(18px, 8vh, 30px); text-shadow: 0 3px 0 #0007; gap: 8px; padding: 20px; }
 #msg small { font-size: 16px; font-weight: 700; opacity: .85; }
 #rotate { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; flex-direction: column; text-align: center; font-size: 22px; font-weight: 800; background: #0b0e16; z-index: 20; }
 #rotate .ph { font-size: 70px; animation: rot 1.6s infinite ease-in-out; }

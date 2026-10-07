@@ -31,12 +31,19 @@
   </div>
   <div id="menu" hidden>
     <div id="mtitle"></div>
-    <div class="mrow">
-      <button data-k="left">◀</button>
-      <button data-k="ok" class="ok">OK</button>
-      <button data-k="right">▶</button>
+    <div id="minfo" hidden><img id="mthumb" alt=""><div class="mtx"><b id="mname"></b><small id="msub"></small><small id="mextra"></small></div></div>
+    <div id="mctl">
+      <div class="dpad">
+        <button data-k="up" class="u" aria-label="Cima">▲</button>
+        <button data-k="left" class="l" aria-label="Esquerda">◀</button>
+        <button data-k="down" class="d" aria-label="Baixo">▼</button>
+        <button data-k="right" class="r" aria-label="Direita">▶</button>
+      </div>
+      <div class="acts">
+        <button data-k="ok" class="ok" id="mok">OK</button>
+        <button data-k="back" class="back">VOLTAR</button>
+      </div>
     </div>
-    <button data-k="back" class="back">VOLTAR</button>
   </div>
   <div id="msg" hidden></div>
   <div id="skull" hidden>💀</div>

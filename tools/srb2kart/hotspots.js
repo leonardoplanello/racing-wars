@@ -14,16 +14,22 @@ const players = Array.from({ length: 8 }, (_, i) => ({ id: i, name: 'P' + i, col
 const game = new Game(players, { track, cup: 'fast', seed: 5, mode: 'race' });
 game.debug.infinite = true; game.debug.noCut = true;
 const rng = makeRng(7); const brains = new Map(game.cars.map((c) => [c.id, makeBrain(rng, 0.85)]));
-const hot = new Map(), falls = new Map(), resp = new Map();
+const hot = new Map(), falls = new Map(), resp = new Map(), lastResp = new Map(), causes = {};
+let loops = 0, total = 0;
 const key = (x, z) => `${Math.round(x / 6) * 6},${Math.round(z / 6) * 6}`;
 let maxS = 0;
 for (let t = 0; t < Number(secs); t += 1 / 60) {
-  for (const c of game.cars) if (c.alive && c.near) { const r = think(brains.get(c.id), c, game, 1 / 60); game.setInput(c.id, r.steer, r.fire); }
+  for (const c of game.cars) if (c.alive && c.near) { const r = think(brains.get(c.id), c, game, 1 / 60); game.setInput(c.id, r.steer, r.fire, r.rev); }
   game.update(1 / 60);
   for (const e of game.drainEvents()) {
     if (e.type === 'wall') { const k = key(e.x, e.z); hot.set(k, (hot.get(k) || 0) + 1); }
     else if (e.type === 'fall') { const k = key(e.x, e.z); falls.set(k, (falls.get(k) || 0) + 1); }
-    else if (e.type === 'respawn') { const k = key(e.x, e.z) + ' ' + e.cause; resp.set(k, (resp.get(k) || 0) + 1); }
+    else if (e.type === 'respawn') {
+      const k = key(e.x, e.z) + ' ' + e.cause; resp.set(k, (resp.get(k) || 0) + 1);
+      total++; causes[e.cause] = (causes[e.cause] || 0) + 1;
+      if (game.time - (lastResp.get(e.car) ?? -99) < 2.5) loops++; // renasceu e caiu/travou de novo logo: loop
+      lastResp.set(e.car, game.time);
+    }
   }
   maxS = Math.max(maxS, ...game.cars.map((c) => c.progress / track.length));
 }
@@ -32,3 +38,4 @@ console.log(`${id}: melhor ${maxS.toFixed(2)} voltas`);
 console.log(' paredes :', top(hot));
 console.log(' quedas  :', top(falls));
 console.log(' renasce :', top(resp));
+console.log(` respawns: ${total} (${Object.entries(causes).map(([k, v]) => k + ':' + v).join(' ')})  em loop (<2,5 s): ${loops}`);

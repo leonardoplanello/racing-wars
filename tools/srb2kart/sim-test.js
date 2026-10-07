@@ -16,7 +16,7 @@ const brains = new Map(game.cars.map((c) => [c.id, makeBrain(rng, 0.85)]));
 let walls = 0, falls = 0, lastBest = 0, stuckT = 0;
 const lapT = [];
 for (let t = 0; t < Number(secs); t += 1 / 60) {
-  for (const c of game.cars) if (c.alive && c.near) { const r = think(brains.get(c.id), c, game, 1 / 60); game.setInput(c.id, r.steer, r.fire); }
+  for (const c of game.cars) if (c.alive && c.near) { const r = think(brains.get(c.id), c, game, 1 / 60); game.setInput(c.id, r.steer, r.fire, r.rev); }
   game.update(1 / 60);
   for (const e of game.drainEvents()) { if (e.type === 'wall') walls++; if (e.type === 'fall') falls++; }
   const best = Math.max(...game.cars.map((c) => c.progress));

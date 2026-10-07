@@ -96,7 +96,8 @@ export function routeThroughCheckpoints(d, opts = {}) {
   const info = { off: 0, boost: false, finish: false, death: false };
   const info2 = { off: 0, boost: false, finish: false, death: false, spring: false, dash: false };
   const G = 26, V = 34; // gravidade e velocidade de cruzeiro do carro (sim/car.js)
-  const JUMP_UP = 14, JUMP_MAX = 60;
+  const JUMP_UP = 14, JUMP_MAX = opts.jumpMax ?? 60; // alcance maximo de um salto (u); o gerador tenta valores maiores quando a pista nao fecha
+  const MAX_DROP = 150; // queda livre maxima entre duas celulas vizinhas (u do jogo); custa caro (0,5/u), so quando nao ha outro caminho
 
   /** Custo de entrar em (x,z) vindo de (px,pz) na altura y; -1 = proibido. Deixa a altura destino em tmp.y. */
   const enter = (px, pz, x, z, y) => {
@@ -105,7 +106,10 @@ export function routeThroughCheckpoints(d, opts = {}) {
     world.surfaceInfo(tmp.sec, info);
     if (info.death) return -1;
     if (world.segmentBlocked(px, pz, x, z, y)) return -1;
-    return info.off ? 7 + 2 * info.off : info.boost ? 0.85 : 1;
+    // queda livre: descer um penhasco nao e rota (o carro despenca num corredor ou fica preso la embaixo); so rampas, saltos e molas descem
+    const drop = y - tmp.y;
+    if (drop > MAX_DROP) return -1;
+    return (info.off ? 7 + 2 * info.off : info.boost ? 0.85 : 1) + (drop > 2 ? drop * 0.5 : 0);
   };
 
   /** O segmento (a->b) passa por algo que nao se dirige (vazio, morte, piso fora do alcance)? E ai que um salto vale a pena. */

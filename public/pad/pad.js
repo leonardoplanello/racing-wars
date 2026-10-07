@@ -90,7 +90,18 @@ function showMode(kind, m) {
   $('skull').hidden = kind !== 'dead';
   S.mode = kind;
   S.steer = 0; S.fire = false; S.rev = false; S.held = { L: false, R: false }; touches.clear();
-  if (kind === 'menu') $('mtitle').textContent = m.title || '';
+  if (kind === 'menu') {
+    $('mtitle').textContent = m.title || '';
+    const info = m.info;
+    $('minfo').hidden = !info;
+    if (info) {
+      $('mname').textContent = info.name || '';
+      $('msub').textContent = info.sub || '';
+      $('mextra').textContent = info.extra || '';
+      if (info.thumb) { if ($('mthumb').getAttribute('src') !== info.thumb) $('mthumb').src = info.thumb; $('mthumb').hidden = false; } else $('mthumb').hidden = true;
+    }
+    $('mok').textContent = m.ok || 'OK';
+  }
   if (kind === 'msg' || kind === 'wait') $('msg').innerHTML = `${m.title || ''}${m.sub ? `<small>${m.sub}</small>` : ''}`;
 }
 

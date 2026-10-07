@@ -71,7 +71,8 @@ export function centerline(world, route, opts = {}) {
       const p = pts[k % n];
       if (p.air) { y = p.y; continue; } // trecho de salto: a altura vem da interpolacao
       const si = world.locate(p.x, p.z);
-      if (world.surfaceIn(si, p.x, p.z, y, tmp)) { y = tmp.y; p.y = y; }
+      // o nivel do caminho original (p.y) manda: a suavizacao pode empurrar o ponto para fora da plataforma sem trocar de nivel
+      if (world.surfaceNear(si, p.x, p.z, p.y, tmp)) { y = tmp.y; p.y = y; } else if (world.surfaceIn(si, p.x, p.z, y, tmp)) { y = tmp.y; p.y = y; }
     }
     for (let i = 0; i < n; i++) {
       if (pts[i].air) { shift[i] = 0; hl[i] = hr[i] = 8; hw[i] = 8; pts[i]._n = [0, 0]; continue; }
@@ -116,7 +117,7 @@ export function centerline(world, route, opts = {}) {
     const p = fin[k % n];
     if (p.air) { y = p.y; continue; }
     const si = world.locate(p.x, p.z);
-    if (world.surfaceIn(si, p.x, p.z, y, tmp)) { y = tmp.y; p.y = y; }
+    if (world.surfaceNear(si, p.x, p.z, p.y, tmp)) { y = tmp.y; p.y = y; } else if (world.surfaceIn(si, p.x, p.z, y, tmp)) { y = tmp.y; p.y = y; }
   }
   for (let i = 0; i < n; i++) {
     if (fin[i].air) { hws[i] = 8; ys[i] = fin[i].y; continue; }

@@ -163,6 +163,8 @@ export function bake(map, soc = {}, scale = SCALE) {
     boxes: map.things.filter((t) => t.type === 2000).map(sub),
     waypoints: map.things.filter((t) => t.type === 292).map(sub),
     starposts: map.things.filter((t) => t.type === 502).map(sub),
+    // demais objetos (cenario, molas...): o build.js resolve o sprite pela info.c
+    objs: map.things.filter((t) => t.type > 16 && ![292, 502, 2000, 750].includes(t.type)).map((t) => ({ ...sub(t), opt: t.options })),
   };
 
   // dash pads (sector special s3 = 5/6): direcao e velocidade vem de um linedef 4 com a mesma tag (v1->v2; comprimento = velocidade)

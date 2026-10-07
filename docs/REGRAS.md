@@ -1,7 +1,7 @@
 # Regras do jogo
 
 ## Objetivo
-Ser o último carro vivo em cada rodada e chegar a **10 pontos**, ou ter mais pontos quando o líder completar **3 voltas**.
+Ser o último carro vivo em cada rodada e chegar a **20 pontos**, ou ter mais pontos quando o líder completar **3 voltas**.
 
 ## Câmera e eliminação
 - Câmera de **perseguição** alta, mas ainda inclinada (44°; ajustável no debug), sempre **atrás** do pelotão. A câmera segue a **média de todos os carros** (posição, velocidade e rumo da pista no ponto médio), com a âncora baixa na tela para mostrar **bastante pista à frente**; o zoom afasta para caber o primeiro e o último carro. A câmera dá zoom out para caber o último carro, até um **limite fixo**; ela sobe e desce com o terreno (rampas, plateau) e não treme com as batidas: a âncora segue o líder devagar na lateral, o rumo e o zoom têm zona morta, e o tremor de explosões é suave e tem teto.
@@ -10,7 +10,7 @@ Ser o último carro vivo em cada rodada e chegar a **10 pontos**, ou ter mais po
 - **Carros explodidos viram carcaças** que ficam no mapa (escuras, soltando fumaça) e **continuam sólidas**: batem nos outros, no cenário e nos muros até o próximo spawn. A carcaça **mantém a velocidade** do carro (o motor "preso" ainda empurra ~1 s), é **~2,5× mais pesada** e capota e rola pela física, sem animação fixa. Os 4 **pneus saem do carro** como corpos físicos (veja Efeitos).
 - **Retardatário acelera**: quem está perto de sair do quadro (por trás) ganha até **+20%** de velocidade até voltar para perto do centro da tela. O líder não recebe o bônus.
 - Um marcador pulsante avisa que um carro está perto de ser cortado ou de se perder no mato.
-- **Câmera: estilo atual ou tela dividida (kart).** No lobby há a opção "Câmera" e a tecla **C** alterna (também durante a partida); a escolha fica salva no navegador (`rw-camera-mode`). Na **tela dividida** cada jogador humano (celular ou teclado) ganha uma célula com a **câmera tradicional de jogos de kart**, atrás do próprio carro (`KartCamera` em `sim/camera.js`, com os valores do SRB2Kart: 160 atrás, 82 acima, mira 64 à frente, filtros de rumo/altura/inclinação, deslocamento lateral na derrapagem, aproximação com nitro, recuo em alta velocidade). Layout: 2 jogadores = uma célula em cima da outra; 3-4 = 2×2; 5-6 = 3×2; 7-8 = 3×3 (a célula livre mostra a classificação). Bots não ganham célula; sem humanos, volta ao estilo atual. Quem morre passa a acompanhar o líder. **É só visual**: as regras (corte de quem fica para trás, pontos) continuam na câmera compartilhada, e cada célula mostra "VOLTE PARA O PELOTÃO!" quando o carro está perto de ser cortado. Com 5 ou mais células a sombra do sol é desligada (ela seria renderizada uma vez por célula). A freecam do debug sempre usa tela cheia.
+- **Câmera: estilo atual ou tela dividida (kart).** No lobby há a opção "Câmera" e a tecla **C** alterna (também durante a partida); a escolha fica salva no navegador (`rw-camera-mode`). Na **tela dividida** cada jogador humano (celular ou teclado) ganha uma célula com a **câmera tradicional de jogos de kart**, atrás do próprio carro (`KartCamera` em `sim/camera.js`, com os valores do SRB2Kart: 160 atrás, 82 acima, mira 64 à frente, filtros de rumo/altura/inclinação, deslocamento lateral na derrapagem, aproximação com nitro, recuo em alta velocidade). Layout: 2 jogadores = uma célula em cima da outra; 3-4 = 2×2; 5-6 = 3×2; 7-8 = 3×3 (a célula livre mostra a classificação). Bots não ganham célula; sem humanos, volta ao estilo atual. Quem morre passa a acompanhar o líder. Cada câmera **não atravessa paredes nem objetos**: se há parede (`MapWorld.nearestWall`), objeto do cenário ou muro entre o kart e a câmera, ela se aproxima na hora e volta devagar quando livre (`camBlocked`); a câmera de cima (só na posição de render `vx/vy/vz`; o enquadramento e o corte seguem a posição das regras) se aproxima da mira pelo mesmo critério. Nenhuma das duas fica **acima de teto** (setor sem céu aberto ou base de piso 3D que cobre o carro), atravessa parede nem entra em objeto do cenário (`camFrac`/`camBlocked` em `sim/camera.js`, `MapWorld.solidAt`). **É só visual**: as regras (corte de quem fica para trás, pontos) continuam na câmera compartilhada, e cada célula mostra "VOLTE PARA O PELOTÃO!" quando o carro está perto de ser cortado. Com 5 ou mais células a sombra do sol é desligada (ela seria renderizada uma vez por célula). A freecam do debug sempre usa tela cheia.
 
 ## Rodadas
 1. Contagem regressiva **3-2-1-GO**; carros travados até o GO.
@@ -28,7 +28,7 @@ Três dificuldades, escolhidas no lobby (**G** ou ▲▼; no celular Master, ▲
 Os bots seguem a linha de corrida (por dentro das curvas), desviam de carros, carcaças, pneus soltos, minas e árvores, evitam a borda do plateau e do precipício, **seguram a faixa da vaga na largada e no spawn** (largada organizada) e escolhem faixas menos cheias.
 
 ## Pontuação
-Todos começam com **5** pontos (mínimo 0, máximo 10).
+Todos começam com **5** pontos (mínimo 0, máximo 20).
 
 | Situação na rodada | Pontos |
 | :--- | :---: |
@@ -38,12 +38,12 @@ Todos começam com **5** pontos (mínimo 0, máximo 10).
 | Demais mortos | −1 |
 
 Com 2 jogadores: sobrevivente +2, outro −2. Se os últimos caírem juntos, o último a morrer conta como sobrevivente.
-**Fim da partida**: alguém chega a 10 (vitória imediata) ou o líder completa 3 voltas (vence quem tem mais pontos; desempate pela ordem de chegada). A volta de todos passa a ser a do sobrevivente a cada nova rodada.
+**Fim da partida**: alguém chega a 20 (vitória imediata) ou o líder completa 3 voltas (vence quem tem mais pontos; desempate pela ordem de chegada). A volta de todos passa a ser a do sobrevivente a cada nova rodada.
 
 ## Carros e física
 - Picapes 4x4 de brinquedo, ~30% menores que na v0.2, em pistas largas.
 - **Hitbox**: o casco de colisão é de 6 círculos (~3,6 × 2,56 u) e cobre o corpo **e as 4 rodas**: carros lado a lado, ou batendo roda com roda, não se atravessam. Pneus soltos também são sólidos (têm hitbox).
-- **Tração traseira, direção dianteira**: modelo de bicicleta dinâmico com pneus que saturam. O motor empurra pelo eixo de trás e consome atrito lateral, então acelerar forte em piso escorregadio faz a traseira escapar. Há um controle de tração que tira o pé quando o carro derrapa.
+- **Tração traseira, direção dianteira**: modelo de bicicleta dinâmico com pneus que saturam. O motor empurra pelo eixo de trás e consome atrito lateral, então acelerar forte em piso escorregadio faz a traseira escapar. Há um controle de tração que tira o pé quando o carro derrapa. **Drift leve**: em curva forte (volante > ~55%) e acima de ~22 u/s a traseira perde até 20% da aderência (`CAR.driftLoss`), deixando o carro rodar um pouco de lado sem perder o controle; com nitro o efeito cai a 40%. Pneus mais firmes que antes (`g` 62, saturação dos pneus menor) para o carro não parecer escorregadio. **Batida lateral escorregadia**: o atrito entre carros é mínimo (`CAR.carFriction`) e, em contato de lado, os dois ganham um empurrão leve para se afastar (`CAR.sideSlide`), então um não fica grudado no outro.
 - Direção **rápida e sensível** (o volante vira com facilidade e o carro tem mais aderência e controle; no celular a seta leva o volante ao máximo em ~0,05 s e a curva do volante é mais sensível perto do centro).
 - Quem é atingido (whomp, batidas) **gira de verdade** e fica virado para onde parou: **não há auto-correção** do rumo.
 - **Roda traseira**: bater na traseira de um carro faz ele perder aderência atrás por ~0,5–1 s e rodopiar com facilidade.
@@ -69,7 +69,7 @@ Caixotes de madeira com símbolo azul brilhante (grupos de 5 na War Cup e de 3 n
 - **Poderes afetam o cenário**: míssil, bomba e Whomp (até `WHOMP.sceneryRadius`) **derrubam árvores e pedras** (o colisor some; voltam na rodada seguinte) e **quebram cercas** no raio; o míssil explode ao bater em árvore/pedra/casa; o gelo deixa o cenário azulado. Casas resistem. Whomp: `push` 160, `maxSpin` 1.7.
 - **Velocidade dos poderes**: `POWER.speedScale` (F4 › Itens) multiplica a velocidade de míssil, onda do Whomp e morteiro.
 - **Canhão de gelo** (canhão sobre o teto do carro enquanto equipado): lança uma bola de gelo como **morteiro, em arco bem alto** (`ICE.lob` = altura do arco; `ICE.flight` = tempo mínimo de voo) que cai **35 u à frente** (`ICE.range`). No impacto, todos os carros num raio de `ICE.radius` (13 u, menos o dono) ficam **congelados `ICE.time` s** (4 s) dentro de um **cubo de gelo** (soltando água ao deslizar — só visual): sem esterço, sem tração e sem item, **rumo travado**. O carro congelado **mantém a velocidade que tinha e vai desacelerando até 85% da velocidade normal** (`CAR.iceKeep`, `CAR.iceDecel`) — nunca abaixo disso. O cubo se estilhaça ao fim; mina, míssil e rastro ainda explodem o carro congelado. Árvores e pedras no raio ficam azuladas.
-- **Mina** (mina no teto): solta atrás do carro. **Quem a tocar com qualquer parte do casco explode.** Se ao ativar houver um carro **encostado na TRASEIRA** do carro com a bomba (atrás dele, tocando as hitboxes traseiras; `POWER.mineTouch`), ele explode na hora e a mina não é largada. Carro ao lado ou à frente não conta.
+- **Mina** (mina no teto): fica **parada exatamente onde foi ativada** (posição e altura; no ar ela fica suspensa e só pega quem passa na mesma altura, `POWER.mineReachY`). O dono só a aciona depois de sair de cima dela. **Quem a tocar com qualquer parte do casco explode.** Se ao ativar houver um carro **encostado na TRASEIRA** do carro com a bomba (atrás dele, tocando as hitboxes traseiras; `POWER.mineTouch`), ele explode na hora e a mina não é largada. Carro ao lado ou à frente não conta.
 
 ## Pistas
 Itens: nitro, mina, míssil, magnético e gelo (sorteio uniforme entre os cinco).
@@ -94,6 +94,16 @@ Metrópole ao entardecer: fachadas dos dois lados são o **muro sólido** da pis
 **Props**: **poste** e **semáforo** são sólidos (poderes derrubam); **cone, placa de pare, hidrante e ponto de ônibus** não seguram o carro: quebram ao toque e tiram um pouco da velocidade (`PROPS.<tipo>.soft`), voltando na rodada seguinte (o hidrante solta um jato de água). **Bomba de combustível**: bater (acima de `PUMP.minSpeed` = 4 u/s), ou um míssil/mina/Whomp perto, a **explode** (`sim/scenery.js › PUMP`): **só quem está no raio de `PUMP.radius` (9 u) morre**, as bombas vizinhas (`PUMP.chain`, 7 u) explodem em cadeia com `PUMP.fuse` (0,16 s) de atraso, e o **fogo e a fumaça ficam até o fim da partida** (as bombas queimadas não voltam entre rodadas; se a rodada acaba no meio da cadeia, as bombas acesas queimam de vez).
 
 A **volta de Downtown pode ser de 3 voltas (~12 min)**; a pista aceita `laps` próprio (`def.laps`) para encurtar.
+
+## Modo corrida (pistas do SRB2Kart)
+- As pistas importadas do SRB2Kart rodam em `mode:'race'` (`sim/game.js`): corrida clássica de N voltas (`track.def.laps`, de 2 a 5), sem rodadas (sair do quadro da câmera explode o carro, como na sobrevivência, exceto o líder). As pistas locais (Ponte do Rio, Downtown) seguem na sobrevivência.
+- **Chegada**: quem completa as voltas ganha a colocação (evento `finish`). A corrida acaba quando todos chegam ou 30 s depois do primeiro (`RULES.finishCountdown`); quem não chegou fica por progresso.
+- **Pontos da corrida** (`RACE_POINTS`): 10, 8, 6, 5, 4, 3, 2, 1 do 1º ao 8º; depois, 0.
+- **Câmera**: a mesma câmera compartilhada da sobrevivência: enquadra o pelotão (média dos carros vivos que não estão despencando, zoom até `hMax`) e segue o rumo da pista pelo progresso médio. Quem sai da área da câmera (por trás ou pelos lados) **explode** (`cut`), exceto o líder, depois de `cutGrace` segundos do GO; o reinício geral que se segue põe todo mundo junto de novo.
+- **Reinício geral com semáforo**: carro que cai, explode (inclusive por corte da câmera) ou fica preso/perdido (`stuckTime`, `lostTime`, `watchDist` em `watchTime` — esses **explodem**, causa `stuck`) fica de fora como carcaça. Quando **sobra só um carro vivo** (e as carcaças já assentaram, `respawnAfter`; mínimo `regroupCooldown` = 4 s desde o último GO), todos os carros que ainda não terminaram são recolocados juntos numa grade `regroupAhead` (8 u) à frente do sobrevivente (em chão firme), ordenados pelo progresso, invulneráveis por `shieldTime`, e o semáforo 3-2-1 roda de novo (`countdown`/`go`; eventos `respawn` com `cause:'regroup'`). Voltas, progresso e tempo da corrida continuam. `Game.respawn` (ponto seguro individual) segue existindo para debug/testes.
+- **Campeonato** (`sim/champ.js`): no seletor de pistas, ▲▼ escolhe 1, 3 ou 5 pistas; a playlist é a pista escolhida e as seguintes da lista (voltando ao começo). Depois de cada corrida aparecem o resultado e a classificação geral; OK vai para a próxima pista (já pré-carregada durante a corrida). Desempate: mais vitórias, depois melhor colocação na última pista.
+- **Menu**: só aparecem as pistas que os bots completam (`playable` em `public/tracks/srb2kart/index.json`, gravado por `tools/srb2kart/validate.js`); com `?track=<id>` a pista pedida entra mesmo assim, para teste. Cada pista tem miniatura do traçado (`thumb`).
+- Batalha (arenas `MAPB*`) ainda não existe: ver `docs/ARQUITETURA.md`.
 
 ## Efeitos
 - Cercas (brancas e de ferro) **se estilhaçam** com física: tábuas e postes voam na direção do carro, quicam e somem; árvores soltam folhas e pedras soltam lascas.

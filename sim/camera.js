@@ -22,12 +22,14 @@ export const CAMERA = {
   cutNy: -1.05, // abaixo disso o carro e destruido (ficou para tras)
   cutNx: 2.0, // lateral: so se for muito longe (explorar o cenario e permitido)
   yawLook: 18, // antecipacao do rumo (unidades ao longo da pista)
+  raceSideNx: 0.82, // corrida: limite lateral do enquadramento (|nx|; 1 = borda da tela)
+  packWindow: 70, // corrida: carros a mais disso (progresso) dos obrigatorios nao puxam a camera
   carY: 0.6,
   shakeMax: 0.8, // teto do tremor (unidades de mundo)
   // suavizacao (1/s; menor = mais calma). A ancora segue o lider devagar na LATERAL para nao acompanhar o balanco do carro.
   kAlong: 6, // ancora ao longo da pista
   kLat: 1.8, // ancora lateral
-  kYaw: 2.4, // rumo da camera
+  kYaw: 3.2, // rumo da camera
   kHUp: 2.5, // zoom out
   kHDown: 0.7, // zoom in
   yawDead: 0.015, // rad: diferencas menores que isso nao mexem a camera
@@ -41,6 +43,45 @@ const tanHalf = () => Math.tan((CAMERA.fov * RAD) / 2);
 const backPerH = () => 1 / Math.tan(CAMERA.pitch - Math.atan(CAMERA.leaderNy * tanHalf()));
 
 const wrap = (a) => Math.atan2(Math.sin(a), Math.cos(a));
+
+// Colisao da camera (pura, so le a pista). `camBlocked`: o ponto (x,z,y) esta dentro de algo solido (teto, piso 3D, objeto do cenario)
+// ou, com `near`, encostado numa parede / muro de borda?
+const _cw = { nx: 0, nz: 0 }, _cn = { v: null }, _cq = [];
+export function camBlocked(track, x, z, y, near = true, m = 1.0, yRef = y) {
+  if (!track) return false;
+  if (track.map && track.map.solidAt(x, z, y, m, yRef)) return true; // teto: a camera nunca fica acima dele
+  if (!near) return false;
+  const sc = track.scenery;
+  if (sc && sc.query) {
+    for (const c of sc.query(x, z, m + 6, _cq)) {
+      if (Math.hypot(c.x - x, c.z - z) < c.r + m && y < (c.top ?? 99) + m) return true;
+    }
+  }
+  if (track.map) return track.map.nearestWall(x, z, y, 0.7, _cw) < 0.7;
+  if (track.nearest && track.hardWall) { // pistas de curva: muro nas bordas (baixo, a camera passa por cima)
+    const n = _cn.v || (_cn.v = track.newNear());
+    track.nearest(x, z, -1, n);
+    const g = track.elevAt ? track.elevAt(n.s) : 0;
+    if (y < g + 4 && track.hardWall(n.idx, n.d) && Math.abs(n.d) > track.edgeAt(n.idx) - m) return true;
+  }
+  return false;
+}
+
+/**
+ * Maior fracao (minF..1) do caminho (x0,y0,z0) -> (x1,y1,z1) em que a camera fica livre. Parede cruzada no caminho, objeto,
+ * teto e piso 3D bloqueiam. Perto do alvo (primeiros pontos) so conta teto/piso 3D: o carro encostado numa parede nao cola a camera nele.
+ */
+export function camFrac(track, x0, y0, z0, x1, y1, z1, minF = 0.05, N = 12) {
+  if (!track) return 1;
+  let px = x0, pz = z0;
+  for (let i = 1; i <= N; i++) {
+    const f = i / N, x = x0 + (x1 - x0) * f, z = z0 + (z1 - z0) * f, y = y0 + (y1 - y0) * f;
+    const crossed = i > 2 && track.map && track.map.segmentWalled(px, pz, x, z);
+    if (crossed || camBlocked(track, x, z, y, i > 2, 1.0, y0)) return Math.max(minF, (i - 1) / N - 0.04);
+    px = x; pz = z;
+  }
+  return 1;
+}
 
 export function projectWith(cx, cy, cz, yaw, aspect, px, py, pz, out) {
   const cp = Math.cos(CAMERA.pitch), sp = Math.sin(CAMERA.pitch);
@@ -96,6 +137,8 @@ export class KartCamera {
     this.yaw = 0; // rumo da camera (rad; frente = (cos, sin) em x,z)
     this.pitch = 0.15; // para baixo (rad)
     this.pan = 0; this.boostCam = 0;
+    this.vy = 0; // altura de render (y encolhida junto com a distancia)
+    this.dFrac = 1; // fracao da distancia ate a camera (encolhe quando ha parede/objeto entre ela e o kart)
     this.ready = false;
   }
 
@@ -113,11 +156,17 @@ export class KartCamera {
     return { lx: car.x + fx * K.lookAhead * s + rx * this.pan, lz: car.z + fz * K.lookAhead * s + rz * this.pan, ly: (car.y || 0) + K.lookZ * s };
   }
 
+  /** Maior fracao (0.12..1) da distancia que mantem a camera e o caminho ate o kart livres de paredes, objetos e tetos. */
+  _clearFrac(car, dist, track) {
+    const fx = Math.cos(this.yaw), fz = Math.sin(this.yaw), rx = -fz, rz = fx, y0 = (car.y || 0) + 1.2;
+    return camFrac(track, car.x, y0, car.z, car.x - fx * dist + rx * this.pan, this.y, car.z - fz * dist + rz * this.pan);
+  }
+
   /** Teletransporta para tras do carro (inicio, troca de alvo). */
   snap(car) {
     const K = KART_CAM, s = K.scale;
-    this.yaw = car.h; this.pan = 0; this.boostCam = 0;
-    this.y = (car.y || 0) + K.height * s;
+    this.yaw = car.h; this.pan = 0; this.boostCam = 0; this.dFrac = 1;
+    this.y = this.vy = (car.y || 0) + K.height * s;
     const l = this._place(car, K.dist * s);
     this.pitch = Math.atan2(this.y - l.ly, Math.hypot(l.lx - this.x, l.lz - this.z));
     this.ready = true;
@@ -129,7 +178,7 @@ export class KartCamera {
    */
   update(dt, car, opts = {}) {
     if (!this.ready) this.snap(car);
-    const K = KART_CAM, s = K.scale, top = opts.top ?? 34;
+    const K = KART_CAM, s = K.scale, top = opts.top ?? 42;
     const k = (r) => 1 - Math.exp(-r * dt);
     const target = car.h + (opts.lookBack ? Math.PI : 0);
     if (opts.lookBack) this.yaw = target;
@@ -148,8 +197,12 @@ export class KartCamera {
 
     const zT = (car.y || 0) + K.height * s;
     this.y += (zT - this.y) * k(K.kZ);
-    const l = this._place(car, dist);
-    const aim = Math.atan2(this.y - l.ly, Math.hypot(l.lx - this.x, l.lz - this.z));
+    // parede/objeto entre o kart e a camera: aproxima na hora, volta devagar
+    const fr = opts.track ? this._clearFrac(car, dist, opts.track) : 1;
+    this.dFrac = fr < this.dFrac ? fr : this.dFrac + (fr - this.dFrac) * k(3);
+    const l = this._place(car, dist * this.dFrac);
+    this.vy = (car.y || 0) + 1.2 + (this.y - (car.y || 0) - 1.2) * this.dFrac; // altura de render: acompanha o encurtamento
+    const aim = Math.atan2(this.vy - l.ly, Math.hypot(l.lx - this.x, l.lz - this.z));
     this.pitch += (aim - this.pitch) * k(K.kPitch);
   }
 }
@@ -164,6 +217,8 @@ export class ChaseCamera {
     this.shake = 0;
     this.t = 0;
     this.x = 0; this.y = 0; this.z = 0;
+    this.track = null; // opcional: a camera de render desvia de paredes, objetos e tetos (`view`)
+    this.vx = 0; this.vy = 0; this.vz = 0; this.vFrac = 1;
     this.place();
   }
 
@@ -175,7 +230,23 @@ export class ChaseCamera {
     out.y = ay + H;
     return out;
   }
-  place() { this.posFor(this.ax, this.az, this.yaw, this.H, this, this.ay); }
+  place() {
+    this.posFor(this.ax, this.az, this.yaw, this.H, this, this.ay);
+  }
+
+  /**
+   * Posicao de RENDER da camera (vx,vy,vz): so visual, as regras (enquadramento, corte) usam x,y,z. Puxa a camera pela linha que a liga
+   * ao ponto de mira ate nao haver parede, objeto nem teto no caminho (aproxima na hora, volta devagar).
+   */
+  view(dt = 0) {
+    const t = this.track;
+    if (!t) { this.vx = this.x; this.vy = this.y; this.vz = this.z; return; }
+    const y0 = this.ay + 1.2;
+    const fr = camFrac(t, this.ax, y0, this.az, this.x, this.y, this.z, 0.05);
+    this.vFrac = fr < this.vFrac || dt <= 0 ? fr : this.vFrac + (fr - this.vFrac) * (1 - Math.exp(-3 * dt));
+    const f = this.vFrac;
+    this.vx = this.ax + (this.x - this.ax) * f; this.vz = this.az + (this.z - this.az) * f; this.vy = y0 + (this.y - y0) * f;
+  }
 
   /** Projeta um ponto do mundo. nx,ny em [-1,1] quando visivel; d = profundidade (<=0: atras da camera). */
   project(px, py, pz, out = { nx: 0, ny: 0, d: 0 }) {
@@ -197,36 +268,60 @@ export class ChaseCamera {
     return track.elevAt(c.near ? c.near.s : track.wrapS(c.progress));
   }
 
-  /** Define o alvo a partir dos carros vivos. `track` fornece o rumo e o chao da pista. */
-  computeTarget(cars, track) {
+  /**
+   * Define o alvo a partir dos carros vivos. `track` fornece o rumo e o chao da pista. `must` (opcional, corrida): carros que a
+   * camera nunca perde; os demais so entram no quadro enquanto couberem no zoom maximo (quem ficou longe demais e ignorado).
+   */
+  computeTarget(cars, track, must = null) {
     if (!cars.length) return;
     if (!(this.aspect > 0.3 && this.aspect < 10)) this.aspect = 16 / 9;
-    // ancora = MEDIA de todos os carros (posicao, velocidade, chao e progresso), nao so o lider
-    let ax = 0, az = 0, ay = 0, vx = 0, vz = 0, pr = 0;
-    for (const c of cars) {
-      ax += c.x; az += c.z; ay += this.groundOf(c, track);
-      vx += c.vx || 0; vz += c.vz || 0; pr += c.progress;
-    }
-    const n = cars.length;
-    this.tax = ax / n;
-    this.taz = az / n;
-    this.tay = ay / n;
-    this.lvx = vx / n;
-    this.lvz = vz / n;
-    const p = track.pointAt(pr / n + CAMERA.yawLook);
-    this.tyaw = Math.atan2(p.tz, p.tx);
-
-    // menor altura que mantem o ultimo carro (embaixo) e o primeiro (em cima) visiveis (busca binaria; monotonica)
     const tmp = { x: 0, y: 0, z: 0 }, o = { nx: 0, ny: 0, d: 0 };
+    // ancora = MEDIA de todos os carros (posicao, velocidade, chao e progresso), nao so o lider
+    const anchor = (set) => {
+      let ax = 0, az = 0, ay = 0, vx = 0, vz = 0, pr = 0;
+      for (const c of set) {
+        ax += c.x; az += c.z; ay += this.groundOf(c, track);
+        vx += c.vx || 0; vz += c.vz || 0; pr += c.progress;
+      }
+      const n = set.length;
+      this.tax = ax / n;
+      this.taz = az / n;
+      this.tay = ay / n;
+      this.lvx = vx / n;
+      this.lvz = vz / n;
+      const p = track.pointAt(pr / n + CAMERA.yawLook);
+      this.tyaw = Math.atan2(p.tz, p.tx);
+    };
+    // corrida: so entram na ancora os carros perto (em progresso) dos obrigatorios; assim quem se afasta sai aos poucos e a
+    // ancora nunca salta do pelotao para o humano de uma vez (a suavizacao deixaria o humano fora do quadro por ~2 s)
+    if (must && must.length) {
+      const mp = must.reduce((a, c) => a + c.progress, 0) / must.length;
+      cars = cars.filter((c) => must.includes(c) || Math.abs(c.progress - mp) <= CAMERA.packWindow);
+    }
+    let set = cars;
+    // menor altura que mantem o ultimo carro (embaixo) e o primeiro (em cima) visiveis (busca binaria; monotonica)
     const fits = (H) => {
       this.posFor(this.tax, this.taz, this.tyaw, H, tmp, this.tay);
-      for (const c of cars) {
+      for (const c of set) {
         projectWith(tmp.x, tmp.y, tmp.z, this.tyaw, this.aspect, c.x, (c.y || 0) + CAMERA.carY, c.z, o);
         const ny = o.d > 0.1 ? o.ny : -9;
         if (ny < CAMERA.rearNy || ny > CAMERA.topNy) return false;
+        if (must && Math.abs(o.nx) > CAMERA.raceSideNx) return false; // corrida: ninguem e cortado, entao a lateral tambem precisa caber
       }
       return true;
     };
+    anchor(set);
+    if (must && must.length && !fits(CAMERA.hMax)) {
+      // tira os mais distantes dos obrigatorios ate o resto caber no zoom maximo
+      const mp = must.reduce((a, c) => a + c.progress, 0) / must.length;
+      const rest = cars.filter((c) => !must.includes(c)).sort((a, b) => Math.abs(a.progress - mp) - Math.abs(b.progress - mp));
+      while (rest.length) {
+        set = [...must, ...rest]; anchor(set);
+        if (fits(CAMERA.hMax)) break;
+        rest.pop();
+      }
+      if (!rest.length) { set = must; anchor(set); }
+    }
     let H;
     if (fits(CAMERA.hMin)) H = CAMERA.hMin;
     else if (!fits(CAMERA.hMax)) H = CAMERA.hMax;
@@ -278,6 +373,7 @@ export class ChaseCamera {
     this.H += (this.tH - this.H) * kh;
     this.shake = Math.min(this.shake, CAMERA.shakeMax) * Math.exp(-5 * dt);
     this.place();
+    this.view(dt);
   }
 
   snap() {
@@ -285,6 +381,7 @@ export class ChaseCamera {
     this.svx = this.lvx; this.svz = this.lvz;
     this.ay = this.tay; this.yaw = this.tyaw; this.H = this.tH; this.tHs = this.tH;
     this.place();
+    this.vFrac = 1; this.view(0);
   }
 
   /** Quao perto do corte esta o ponto (>1 = sera destruido). Pela frente nunca passa de 0. */
