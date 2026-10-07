@@ -74,35 +74,25 @@ Caixotes de madeira com símbolo azul brilhante (grupos de 5 na War Cup e de 3 n
 ## Pistas
 Itens: nitro, mina, míssil, magnético e gelo (sorteio uniforme entre os cinco).
 
-Pistas disponíveis: **Ponte do Rio** (teste) e **Downtown**. Planejadas: Water Hill, Death Mountain, Farm Jump.
+Pistas disponíveis: **Ponte do Rio** (teste) e **Passo da Montanha**, mais a pasta **Pistas Sonic** (SRB2Kart). Planejadas: Water Hill, Death Mountain, Farm Jump.
 
 ### Ponte do Rio (teste)
 ~1,5 min por volta: ponte de madeira com vigas de aço sobre o rio, estrada de terra com sulcos entre cercas de ferro, um zigue-zague de **curvas fechadas** na praça de paralelepípedo, **2 rampas de salto** uma **área alta (plateau) sem guardrails** de onde é possível cair e um **precipício** ao lado da pista (fosso fundo, sem cerca, na parte externa da curva grande do leste): sem cercas na beira. Quem cai **não morre na hora**: despenca (visível) e é eliminado ao **sair do enquadramento** da câmera (ou após `RULES.chasmFallMax` = 3 s).
 
-### Downtown (~4 min por volta, ~7,6 mil u)
-Metrópole ao entardecer: fachadas dos dois lados são o **muro sólido** da pista (nada de terra aberta), postes acesos, semáforos que trocam de cor, placas de pare, hidrantes, pontos de ônibus e placas de neon. Sete trechos, nesta ordem:
-1. **Avenida Central** (largada): reta larga de 4 faixas.
-2. **Quarteirões**: curvas de 90° em zigue-zague, chicane de cones na obra.
-3. **Posto de gasolina** (esquina larga, lado de dentro aberto): ilha de bombas sob uma cobertura, com um **canal estreito** (~4 u) no meio e **uma caixa** dentro. Atalho opcional que corta a esquina.
-4. **Bairro antigo**: paralelepípedo, largura 10, curvas fechadas.
-5. **Pátio das cegonhas**: a **primeira carreta é a rampa** de salto e a segunda é o pouso; **uma caixa flutua** entre elas (só pega quem está no ar). Quem prefere seguro sai pelo **lote ao lado** (lado aberto, com caixotes).
-6. **Viaduto**: sobe ~300 u até 7 u de altura (deck de concreto com muros tipo jersey) e termina em **lábio abrupto**: o salto é obrigatório e o carro cai na rodovia (a continuação da pista, no chão). Perto do lábio o guard-rail está **quebrado** do lado esquerdo, com cones afunilando; quem é empurrado ali cai ao lado da pista. Pouso com queda vertical > `CAR.crashSpeed` capota.
-7. **Rodovia e retorno**: reta rápida de 3 faixas com pórtico de sinalização, saída curva e volta à avenida.
-
-**Atalhos opcionais** (lado de dentro de uma esquina sem muro, `openZones`): **A** praça com fonte e caixotes; **B** beco de ~8 u entre dois prédios (com caixa); **C** canteiro de obras ao lado do trecho dos cones (com caixa). Cortam caminho, mas têm obstáculos sólidos; longe demais da pista (`CAR.offroadMax`) o carro explode.
-
-**Props**: **poste** e **semáforo** são sólidos (poderes derrubam); **cone, placa de pare, hidrante e ponto de ônibus** não seguram o carro: quebram ao toque e tiram um pouco da velocidade (`PROPS.<tipo>.soft`), voltando na rodada seguinte (o hidrante solta um jato de água). **Bomba de combustível**: bater (acima de `PUMP.minSpeed` = 4 u/s), ou um míssil/mina/Whomp perto, a **explode** (`sim/scenery.js › PUMP`): **só quem está no raio de `PUMP.radius` (9 u) morre**, as bombas vizinhas (`PUMP.chain`, 7 u) explodem em cadeia com `PUMP.fuse` (0,16 s) de atraso, e o **fogo e a fumaça ficam até o fim da partida** (as bombas queimadas não voltam entre rodadas; se a rodada acaba no meio da cadeia, as bombas acesas queimam de vez).
-
-A **volta de Downtown pode ser de 3 voltas (~12 min)**; a pista aceita `laps` próprio (`def.laps`) para encurtar.
+### Passo da Montanha (~2,6 min por volta, ~5,9 mil u)
+Mesmo estilo da Ponte do Rio, numa serra (tema `kind:'mountain'`: céu frio, picos com neve, pinheiros, chão de cascalho). A volta é **horária**. Em ordem: ponte de madeira no desfiladeiro da largada, **garganta estreita**, subida até um patamar, **grampos de serra** em pedra com **duas rampas de salto** (em reta: o carro decola reto e pousa na estrada), precipícios sem cerca nas curvas, **platô alto no cume sem guardrails** de onde é possível cair e, no fim da volta, três trechos novos:
+1. **Praia**: reta de areia (`SURF.SAND`, um pouco menos de aderência) com o **mar à esquerda**, separado da estrada por uma faixa de areia de 30 u. Cair no mar elimina o carro (é um precipício de água, `chasms[].water`).
+2. **Subida em serpentina**: arco de ~200° para a esquerda em volta de uma montanha, subindo ~22 u em piso de pedra. **Montanha (parede sólida) à esquerda** (`solidWalls`), **queda (precipício) à direita** e uma fileira de **caixas na beirada da queda** (`boxRows`). O grampo do topo volta à direita e começa a descida.
+3. **Descida com ponte e rampa**: ponte de madeira sobre um rio, em reta e ao nível do chão, seguida de uma **rampa de salto** em reta e a curva final para a largada.
 
 ## Modo corrida (pistas do SRB2Kart)
-- As pistas importadas do SRB2Kart rodam em `mode:'race'` (`sim/game.js`): corrida clássica de N voltas (`track.def.laps`, de 2 a 5), sem rodadas (sair do quadro da câmera explode o carro, como na sobrevivência, exceto o líder). As pistas locais (Ponte do Rio, Downtown) seguem na sobrevivência.
+- As pistas importadas do SRB2Kart rodam em `mode:'race'` (`sim/game.js`): corrida clássica de N voltas (`track.def.laps`, de 2 a 5), sem rodadas (sair do quadro da câmera explode o carro, como na sobrevivência, exceto o líder). As pistas locais (Ponte do Rio, Passo da Montanha) seguem na sobrevivência.
 - **Chegada**: quem completa as voltas ganha a colocação (evento `finish`). A corrida acaba quando todos chegam ou 30 s depois do primeiro (`RULES.finishCountdown`); quem não chegou fica por progresso.
 - **Pontos da corrida** (`RACE_POINTS`): 10, 8, 6, 5, 4, 3, 2, 1 do 1º ao 8º; depois, 0.
 - **Câmera**: a mesma câmera compartilhada da sobrevivência: enquadra o pelotão (média dos carros vivos que não estão despencando, zoom até `hMax`) e segue o rumo da pista pelo progresso médio. Quem sai da área da câmera (por trás ou pelos lados) **explode** (`cut`), exceto o líder, depois de `cutGrace` segundos do GO; o reinício geral que se segue põe todo mundo junto de novo.
 - **Reinício geral com semáforo**: carro que cai, explode (inclusive por corte da câmera) ou fica preso/perdido (`stuckTime`, `lostTime`, `watchDist` em `watchTime` — esses **explodem**, causa `stuck`) fica de fora como carcaça. Quando **sobra só um carro vivo** (e as carcaças já assentaram, `respawnAfter`; mínimo `regroupCooldown` = 4 s desde o último GO), todos os carros que ainda não terminaram são recolocados juntos numa grade `regroupAhead` (8 u) à frente do sobrevivente (em chão firme), ordenados pelo progresso, invulneráveis por `shieldTime`, e o semáforo 3-2-1 roda de novo (`countdown`/`go`; eventos `respawn` com `cause:'regroup'`). Voltas, progresso e tempo da corrida continuam. `Game.respawn` (ponto seguro individual) segue existindo para debug/testes.
 - **Campeonato** (`sim/champ.js`): no seletor de pistas, ▲▼ escolhe 1, 3 ou 5 pistas; a playlist é a pista escolhida e as seguintes da lista (voltando ao começo). Depois de cada corrida aparecem o resultado e a classificação geral; OK vai para a próxima pista (já pré-carregada durante a corrida). Desempate: mais vitórias, depois melhor colocação na última pista.
-- **Menu**: só aparecem as pistas que os bots completam (`playable` em `public/tracks/srb2kart/index.json`, gravado por `tools/srb2kart/validate.js`); com `?track=<id>` a pista pedida entra mesmo assim, para teste. Cada pista tem miniatura do traçado (`thumb`).
+- **Menu**: as pistas do Sonic ficam numa **pasta** ("Pistas Sonic"): OK abre, VOLTAR sai (a raiz mostra só as pistas próprias). Só aparecem as pistas que os bots completam (`playable` em `public/tracks/srb2kart/index.json`, gravado por `tools/srb2kart/validate.js`); com `?track=<id>` a pista pedida entra mesmo assim, para teste. Cada pista tem miniatura do traçado (`thumb`).
 - Batalha (arenas `MAPB*`) ainda não existe: ver `docs/ARQUITETURA.md`.
 
 ## Efeitos
@@ -126,5 +116,5 @@ Página dedicada em **`/editor/`** (no Pages: `editor/`). Mostra a pista real em
 - **Pontos da pista**: arraste para mover, ＋ insere no trecho clicado, － remove (mín. 4). Aviso se a curva for fechada demais.
 - **Rampas/colinas, precipícios, pontes e materiais do piso** (asfalto, madeira, terra, paralelepípedo): listas com início/fim (sliders, destacados na pista), altura, subida, descida (0 = lábio), grades, lado e largura.
 - **Objetos à mão** (`def.objects`: árvore, pedra, casa) e **grupos de caixas de item** (`def.boxGroups`), além da quantidade de cenário aleatório.
-- Abra uma pista específica com **`/editor/?track=downtown`**.
+- Abra uma pista específica com **`/editor/?track=mountain`**.
 - **Salvar** grava em `localStorage` (`rw-debug-track:<id>`, a mesma chave do F4); **Testar no jogo** abre o jogo com `?debug`, que usa a pista salva. Exportar/Importar JSON.

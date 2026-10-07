@@ -305,11 +305,12 @@ function verticalStep(car, track, dt, events, px, pz) {
   if (!car.air) {
     const yFree = car.y + car.vy * dt - 0.5 * G * dt * dt;
     // pistas de mapa: degraus pequenos para baixo (rampas feitas de pisos 3D empilhados) nao fazem o carro decolar
-    const tol = track.map ? step * 0.6 : 1e-3;
+    const tol = track.map ? step * 0.6 : 0.03; // folga: descidas suaves colam no chao em vez de quicar
     if (GP.y < yFree - tol && car.y - GP.y > tol) car.air = true; // o chao fugiu: voo balistico com a velocidade da rampa
     else {
       car.vy = car.vy * 0.2 + ((GP.y - car.y) / dt) * 0.8;
       if (track.map) car.vy = Math.max(-30, Math.min(30, car.vy));
+      car.gvy = car.vy; // velocidade vertical do chao: reaproveitada no pouso para nao quicar em descidas
       car.y = GP.y;
     }
   }
@@ -325,7 +326,7 @@ function verticalStep(car, track, dt, events, px, pz) {
       else if (impact < -4) {
         car.vy = -impact * 0.18; // quique da suspensao
         if (events) events.push({ type: 'land', car: car.id, x: car.x, z: car.z, strength: Math.min(1, -impact / 14) });
-      } else { car.air = false; car.vy = 0; }
+      } else { car.air = false; car.vy = Math.min(0, car.gvy ?? 0) * 0.5; } // pouso suave: segue a inclinacao do chao
     }
   }
 }

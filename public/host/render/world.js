@@ -67,6 +67,7 @@ export function buildWorld(track, quality = 'high', opts = {}) {
   const HWf = (k) => HWa[k % N], EDGEf = (k) => HWa[k % N] + vg;
   const theme = track.theme || {};
   const city = theme.kind === 'city';
+  const mountain = theme.kind === 'mountain';
   let maxHW = 0;
   for (let i = 0; i < N; i++) maxHW = Math.max(maxHW, HWa[i]);
   let bx0 = 1e9, bx1 = -1e9, bz0 = 1e9, bz1 = -1e9;
@@ -81,6 +82,7 @@ export function buildWorld(track, quality = 'high', opts = {}) {
     asphalt: new THREE.MeshStandardMaterial({ map: TX.asphaltTexture(), roughness: 0.92 }),
     dirt: new THREE.MeshStandardMaterial({ map: TX.dirtTexture(), roughness: 1 }),
     cobble: new THREE.MeshStandardMaterial({ map: TX.cobbleTexture(), roughness: 0.9 }),
+    sand: new THREE.MeshStandardMaterial({ map: TX.sandTexture(), roughness: 1 }),
     iron: new THREE.MeshStandardMaterial({ color: 0x1a1d26, roughness: 0.45, metalness: 0.6 }),
     steel: new THREE.MeshStandardMaterial({ map: TX.steelTexture(), roughness: 0.5, metalness: 0.4 }),
     logs: new THREE.MeshStandardMaterial({ map: TX.woodTexture(), roughness: 0.9, color: 0xd9b48a }),
@@ -89,11 +91,11 @@ export function buildWorld(track, quality = 'high', opts = {}) {
     yellow: new THREE.MeshStandardMaterial({ color: 0xffd23a, roughness: 0.6, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }),
   };
   const skirtDirt = new THREE.MeshStandardMaterial({ map: TX.dirtTexture(), roughness: 1, side: THREE.DoubleSide });
-  for (const k of ['wood', 'asphalt', 'dirt', 'cobble', 'logs']) M[k].side = THREE.DoubleSide;
+  for (const k of ['wood', 'asphalt', 'dirt', 'cobble', 'sand', 'logs']) M[k].side = THREE.DoubleSide;
 
   // ------------------------------------------------------------ faixas (pista)
   const HSK = track.HSKIN;
-  const classOf = (i) => (BRIDGE[i] ? 'wood' : HSK[i] === 1 ? 'steel' : SURFACE[i] === 3 ? 'cobble' : SURFACE[i] === 2 ? 'dirt' : SURFACE[i] === 1 ? 'wood' : 'asphalt');
+  const classOf = (i) => (BRIDGE[i] ? 'wood' : HSK[i] === 1 ? 'steel' : SURFACE[i] === 8 ? 'sand' : SURFACE[i] === 3 ? 'cobble' : SURFACE[i] === 2 ? 'dirt' : SURFACE[i] === 1 ? 'wood' : 'asphalt');
   const runs = [];
   {
     let s = 0;
@@ -135,14 +137,14 @@ export function buildWorld(track, quality = 'high', opts = {}) {
 
   for (const r of runs) {
     const half = (r.cls === 'wood' && BRIDGE[r.a]) || r.cls === 'steel' ? EDGEf : HWf;
-    add(strip(r.a, r.b, (k) => -half(k), half, 0.02, r.cls === 'dirt' ? 12.8 : r.cls === 'cobble' ? 12.8 : 6.4, r.cls === 'cobble' ? 12.8 : 6.4), M[r.cls]);
+    add(strip(r.a, r.b, (k) => -half(k), half, 0.02, r.cls === 'dirt' || r.cls === 'sand' ? 12.8 : r.cls === 'cobble' ? 12.8 : 6.4, r.cls === 'cobble' ? 12.8 : 6.4), M[r.cls]);
     if ((r.cls !== 'wood' || !BRIDGE[r.a]) && r.cls !== 'steel') {
       // berma de pedra entre a pista e o muro
-      add(strip(r.a, r.b, HWf, EDGEf, 0.01, 12.8, 6.4), M.verge);
-      add(strip(r.a, r.b, (k) => -EDGEf(k), (k) => -HWf(k), 0.01, 12.8, 6.4), M.verge);
+      add(strip(r.a, r.b, HWf, EDGEf, 0.01, 12.8, 6.4), r.cls === 'sand' ? M.sand : M.verge);
+      add(strip(r.a, r.b, (k) => -EDGEf(k), (k) => -HWf(k), 0.01, 12.8, 6.4), r.cls === 'sand' ? M.sand : M.verge);
     }
     // linhas laterais brancas (a estrada de terra nao tem)
-    if (r.cls === 'dirt' || r.cls === 'steel') continue;
+    if (r.cls === 'dirt' || r.cls === 'steel' || r.cls === 'sand') continue;
     add(strip(r.a, r.b, (k) => HWf(k) - 1.3, (k) => HWf(k) - 0.8, 0.06, 1, 1, 2), M.paint, { receive: false });
     add(strip(r.a, r.b, (k) => -HWf(k) + 0.8, (k) => -HWf(k) + 1.3, 0.06, 1, 1, 2), M.paint, { receive: false });
   }
@@ -232,6 +234,16 @@ export function buildWorld(track, quality = 'high', opts = {}) {
       add(strip(a, b, (k) => sg * EDGEf(k), (k) => sg * (EDGEf(k) + w), 0.008, 12.8, 6.4), M.verge);
     }
   }
+  // praia: faixa de areia entre a estrada e o mar (`gap`) e uma faixa estreita do lado de terra
+  for (const c of track.def.chasms || []) {
+    if (!c.water) continue;
+    const a = Math.floor(c.from * N);
+    let b = Math.ceil(c.to * N);
+    if (c.to < c.from) b += N;
+    const sg = c.side === 1 ? 1 : -1;
+    add(strip(a, b, (k) => sg * EDGEf(k), (k) => sg * (EDGEf(k) + track.CHG[k] + 1), 0.012, 12.8, 6.4), M.sand);
+    add(strip(a, b, (k) => -sg * EDGEf(k), (k) => -sg * (EDGEf(k) + 22), 0.012, 12.8, 6.4), M.sand);
+  }
   // rodas das carretas (colinas com skin 'truck'): eixos duplos sob a plataforma, nos dois lados
   {
     const wm = [];
@@ -267,24 +279,25 @@ export function buildWorld(track, quality = 'high', opts = {}) {
     }
     if (!BRIDGE.some((v) => v)) bridgeRuns.length = 0;
   }
-  // precipicios: faixas ao lado da pista, da borda ate `width`; viram furos no terreno (poligonos)
-  const chasmPolys = [];
+  // precipicios: faixas ao lado da pista, da borda (+gap) ate `width`; viram furos no terreno (poligonos).
+  // Os de agua (`water`, o oceano) ganham a superficie da agua; os demais o fundo preto.
+  const chasmPolys = [], seaPolys = [];
   if (track.hasChasm) {
-    for (const sg of [-1, 1]) {
+    for (const water of [0, 1]) for (const sg of [-1, 1]) {
       let run = [];
       const flush = () => {
         if (run.length > 1) {
           const pick = run.filter((_, j) => j % 3 === 0 || j === run.length - 1);
           const pts = [];
-          for (const k of pick) pts.push([X[k] + NX[k] * sg * (EDGEf(k) + 0.3), Z[k] + NZ[k] * sg * (EDGEf(k) + 0.3)]);
+          for (const k of pick) pts.push([X[k] + NX[k] * sg * (EDGEf(k) + track.CHG[k]), Z[k] + NZ[k] * sg * (EDGEf(k) + track.CHG[k])]);
           for (const k of pick.slice().reverse()) pts.push([X[k] + NX[k] * sg * (EDGEf(k) + track.CHW[k]), Z[k] + NZ[k] * sg * (EDGEf(k) + track.CHW[k])]);
-          chasmPolys.push(pts);
+          (water ? seaPolys : chasmPolys).push(pts);
         }
         run = [];
       };
       for (let i = 0; i < N; i++) {
         const c = track.CH[i];
-        if (c === sg || c === 2) run.push(i); else flush();
+        if ((c === sg || c === 2) && track.CHWATER[i] === water) run.push(i); else flush();
       }
       flush();
     }
@@ -313,7 +326,7 @@ export function buildWorld(track, quality = 'high', opts = {}) {
       shape.holes.push(h);
       holes.push(pts);
     }
-    for (const pts of chasmPolys) {
+    for (const pts of [...chasmPolys, ...seaPolys]) {
       const h = new THREE.Path();
       pts.forEach(([x, z], i) => (i ? h.lineTo(x, -z) : h.moveTo(x, -z)));
       h.closePath();
@@ -321,7 +334,7 @@ export function buildWorld(track, quality = 'high', opts = {}) {
     }
     const gg = new THREE.ShapeGeometry(shape);
     gg.rotateX(-Math.PI / 2);
-    const grassT = city ? TX.cityGroundTexture() : TX.grassTexture();
+    const grassT = city ? TX.cityGroundTexture() : mountain ? TX.rockGroundTexture() : TX.grassTexture();
     grassT.repeat.set(1 / 9, 1 / 9);
     const uv = gg.getAttribute('uv'), p = gg.getAttribute('position');
     for (let i = 0; i < uv.count; i++) uv.setXY(i, p.getX(i), p.getZ(i));
@@ -330,8 +343,8 @@ export function buildWorld(track, quality = 'high', opts = {}) {
     ground.receiveShadow = true;
     group.add(ground);
 
-    // agua + barrancos
-    for (const pts of holes) {
+    // agua + barrancos (rio da ponte e oceano)
+    for (const pts of [...holes, ...seaPolys]) {
       const wg = new THREE.ShapeGeometry(new THREE.Shape(pts.map(([x, z]) => new THREE.Vector2(x, -z))));
       wg.rotateX(-Math.PI / 2);
       const wuv = wg.getAttribute('uv'), wp = wg.getAttribute('position');
@@ -384,9 +397,9 @@ export function buildWorld(track, quality = 'high', opts = {}) {
       group.add(floor);
     }
   }
-  if (!poly.length && !chasmPolys.length) {
+  if (!poly.length && !chasmPolys.length && !seaPolys.length) {
     const gg = new THREE.PlaneGeometry(GROUND_R * 2, GROUND_R * 2).translate((bx0 + bx1) / 2, (bz0 + bz1) / 2, 0).rotateX(-Math.PI / 2);
-    const grassT = city ? TX.cityGroundTexture() : TX.grassTexture();
+    const grassT = city ? TX.cityGroundTexture() : mountain ? TX.rockGroundTexture() : TX.grassTexture();
     grassT.repeat.set(GROUND_R * 2 / 9, GROUND_R * 2 / 9);
     const ground = new THREE.Mesh(gg, new THREE.MeshStandardMaterial({ map: grassT, roughness: 1 }));
     ground.position.y = -0.02;
@@ -495,6 +508,55 @@ export function buildWorld(track, quality = 'high', opts = {}) {
     }
   }
 
+  // ------------------------------------------------------------ montanha: parede solida (`solidWalls`) + encosta rochosa com neve
+  if (!fast) for (const w of track.def.solidWalls || []) {
+    const sg = w.side === 1 ? 1 : -1;
+    const a = Math.floor(w.from * N);
+    let b = Math.ceil(w.to * N);
+    if (w.to < w.from) b += N;
+    const seg = Math.max(1, Math.round(7 / ds));
+    const rockT = TX.rockGroundTexture();
+    const blocks = [];
+    for (let i = a; i < b; i += seg) {
+      const k0 = i % N, k1 = Math.min(i + seg, b) % N;
+      const o = (EDGEf(k0) + 1.6) * sg, o1 = (EDGEf(k1) + 1.6) * sg;
+      const x0 = X[k0] + NX[k0] * o, z0 = Z[k0] + NZ[k0] * o, x1 = X[k1] + NX[k1] * o1, z1 = Z[k1] + NZ[k1] * o1;
+      const len = Math.hypot(x1 - x0, z1 - z0) + 0.4, yaw = Math.atan2(z1 - z0, x1 - x0);
+      const h = 5 + rng() * 3;
+      blocks.push(matrix((x0 + x1) / 2, ELEV[k0] + h / 2 - 0.5, (z0 + z1) / 2, yaw, len, h, 3 + rng() * 1.5));
+    }
+    group.add(instanced(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshStandardMaterial({ map: rockT, color: 0xb9bcc6, roughness: 1 }), blocks));
+    // encosta: perfil (deslocamento, altura acima do tabuleiro) subindo ate o cume e voltando ao chao
+    const prof = [[1.5, 0], [4, 7], [12, 18], [34, 30], [70, 24], [105, 10], [140, -1]];
+    const pos = [], col = [], idx = [];
+    const snowAt = 24, c = new THREE.Color();
+    let cols = 0;
+    for (let i = a; i <= b; i += 2) {
+      const k = i % N;
+      for (const [off, hh] of prof) {
+        const o = (EDGEf(k) + off) * sg;
+        const y = Math.max(-0.5, ELEV[k] * Math.max(0, 1 - off / 140) + hh);
+        pos.push(X[k] + NX[k] * o, y, Z[k] + NZ[k] * o);
+        if (y > ELEV[k] * Math.max(0, 1 - off / 140) + snowAt) c.set(0xf2f6fb); else c.set(hh > 14 ? 0x7d8290 : 0x6a6f7c);
+        col.push(c.r, c.g, c.b);
+      }
+      cols++;
+    }
+    for (let j = 0; j < cols - 1; j++) for (let q = 0; q < prof.length - 1; q++) {
+      const v = j * prof.length + q, v2 = v + prof.length;
+      idx.push(v, v + 1, v2, v + 1, v2 + 1, v2);
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+    g.setIndex(idx);
+    g.computeVertexNormals();
+    const hill = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1, flatShading: true, side: THREE.DoubleSide }));
+    hill.castShadow = true;
+    hill.receiveShadow = true;
+    decor.add(hill);
+  }
+
   // ------------------------------------------------------------ largada: linha, vagas e portico
   let gantry = null;
   {
@@ -552,8 +614,8 @@ export function buildWorld(track, quality = 'high', opts = {}) {
     const mats = [];
     const peaks = [];
     for (let i = 0; i < (low ? 8 : 16); i++) {
-      const a = (i / (low ? 8 : 16)) * Math.PI * 2 + rng() * 0.3, r = Math.max(520, span + 300) + rng() * 140;
-      const h = 90 + rng() * 120, w = 110 + rng() * 80;
+      const a = (i / (low ? 8 : 16)) * Math.PI * 2 + rng() * 0.3, r = Math.max(520, span + (mountain ? 200 : 300)) + rng() * 140;
+      const h = mountain ? 180 + rng() * 170 : 90 + rng() * 120, w = mountain ? 130 + rng() * 90 : 110 + rng() * 80;
       peaks.push([cx + Math.cos(a) * r, cz + Math.sin(a) * r, h, w]);
     }
     const mg = mergeGeometries(peaks.map(([x, z, h, w], i) => {
@@ -561,6 +623,12 @@ export function buildWorld(track, quality = 'high', opts = {}) {
       const pos = g.getAttribute('position');
       for (let k = 0; k < pos.count; k++) pos.setXYZ(k, pos.getX(k) + Math.sin(k * 12.9898 + i) * 7, pos.getY(k), pos.getZ(k) + Math.cos(k * 78.233 + i) * 7);
       g.computeVertexNormals();
+      if (mountain) {
+        // rocha cinza-azulada com capa de neve no terco de cima
+        const c = colored(g, [0x6f7684, 0x5f6675, 0x7a8190][i % 3]), cp = c.getAttribute('position'), cc = c.getAttribute('color');
+        for (let k = 0; k < cp.count; k++) if (cp.getY(k) > h * 0.62) cc.setXYZ(k, 0.95, 0.97, 1);
+        return c;
+      }
       return colored(g, [0xc98a3c, 0xb8742f, 0xd89b4a][i % 3]);
     }));
     decor.add(new THREE.Mesh(mg, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1, flatShading: true })));
@@ -673,7 +741,7 @@ export function buildWorld(track, quality = 'high', opts = {}) {
 // ---------------------------------------------------------------- decoracao
 function addScenery(group, track, { rng, low, bridgeRuns, W, edge, breakables, meshes, fast, decor, city }) {
   const sc0 = track.scenery;
-  const { N, X, Z, NX, NZ, ELEV, BRIDGE } = track;
+  const { N, X, Z, NX, NZ, ELEV, BRIDGE, SURFACE } = track;
   // hash espacial das amostras da pista para medir distancia
   const cell = 24, grid = new Map();
   const key = (cx, cz) => (cx * 73856093) ^ (cz * 19349663);
@@ -707,18 +775,23 @@ function addScenery(group, track, { rng, low, bridgeRuns, W, edge, breakables, m
       const d = dist(x, z);
       if (d < clear + minD || d > maxD) continue;
       if (bridgeRuns.length && dist(x, z, true) < W + 4) continue;
-      if (track.chasmContains(x, z)) continue;
+      if (track.chasmContains(x, z) || track.inSolidZone?.(x, z)) continue;
       out.push([x, z]);
     }
     return out;
   };
+  const mtn = track.theme?.kind === 'mountain';
   const f = low ? 0.4 : 1;
   const tint = new THREE.Color();
 
   if (!fast && !city) {
   // arvores redondas (copa dupla + tronco) e pinheiros
   const trunkG = colored(new THREE.CylinderGeometry(0.85, 1.25, 6, 7).translate(0, 3, 0), 0x7a4e2b);
-  const crownG = mergeGeometries([
+  const crownG = mtn ? mergeGeometries([ // pinheiro: tres cones empilhados
+    colored(new THREE.ConeGeometry(4.6, 6, 8).translate(0, 7, 0), 0xffffff),
+    colored(new THREE.ConeGeometry(3.6, 5.5, 8).translate(0, 10.5, 0), 0xffffff),
+    colored(new THREE.ConeGeometry(2.4, 5, 8).translate(0, 14, 0), 0xffffff),
+  ]) : mergeGeometries([
     colored(new THREE.IcosahedronGeometry(4.6, 1).translate(0, 8.4, 0), 0xffffff),
     colored(new THREE.IcosahedronGeometry(3.4, 1).translate(3.2, 10.4, 1), 0xffffff),
     colored(new THREE.IcosahedronGeometry(3.2, 1).translate(-2.8, 10.0, -1.4), 0xffffff),
@@ -733,7 +806,7 @@ function addScenery(group, track, { rng, low, bridgeRuns, W, edge, breakables, m
     const m = matrix(t.x, 0, t.z, t.yaw, t.s, t.sy, t.s);
     crown.setMatrixAt(i, m);
     trunk.setMatrixAt(i, m);
-    tint.setHSL(0.26 + t.hue * 0.07, 0.62, 0.34 + t.light * 0.14);
+    if (mtn) tint.setHSL(0.36 + t.hue * 0.05, 0.4, 0.17 + t.light * 0.1); else tint.setHSL(0.26 + t.hue * 0.07, 0.62, 0.34 + t.light * 0.14);
     crown.setColorAt(i, tint);
     scn.tree.push({ m: m.clone(), c: tint.clone() });
   });
@@ -747,7 +820,14 @@ function addScenery(group, track, { rng, low, bridgeRuns, W, edge, breakables, m
       colored(new THREE.IcosahedronGeometry(2.3, 1).translate(0, 9.8, 0), 0x2f9e3f),
     ];
     const palmG = mergeGeometries(parts);
-    const palms = spots(Math.round(70 * f), 0, edge + 60);
+    const palms = mtn ? [] : spots(Math.round(70 * f), 0, edge + 60);
+    if (mtn) { // praia: palmeiras no lado de terra da areia
+      for (let i = 0; i < N; i += 14) {
+        if (SURFACE[i] !== 8 || rng() < 0.3) continue;
+        const o = track.HW[i] + track.verge + 6 + rng() * 14; // lado de terra (direita; o mar fica a esquerda)
+        palms.push([X[i] + NX[i] * o, Z[i] + NZ[i] * o]);
+      }
+    }
     const pm = new THREE.InstancedMesh(palmG, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.8, flatShading: true, side: THREE.DoubleSide }), palms.length);
     pm.castShadow = true;
     palms.forEach(([x, z], i) => pm.setMatrixAt(i, matrix(x, 0, z, rng() * 6.28, 1 + rng() * 0.5, 1 + rng() * 0.5, 1 + rng() * 0.5)));
@@ -786,7 +866,7 @@ function addScenery(group, track, { rng, low, bridgeRuns, W, edge, breakables, m
     const gt = new THREE.PlaneGeometry(2.6, 2.0).translate(0, 1.0, 0);
     const cross = mergeGeometries([gt.clone(), gt.clone().rotateY(Math.PI / 2), gt.clone().rotateY(Math.PI / 4)]);
     const mat = new THREE.MeshStandardMaterial({ map: TX.tuftTexture(), alphaTest: 0.5, side: THREE.DoubleSide, roughness: 1 });
-    const n = Math.round(2600 * f);
+    const n = Math.round((mtn ? 500 : 2600) * f);
     const tufts = [];
     let guard = n * 30;
     while (tufts.length < n && guard-- > 0) {
@@ -796,7 +876,7 @@ function addScenery(group, track, { rng, low, bridgeRuns, W, edge, breakables, m
       const x = X[i] + NX[i] * o + (rng() - 0.5) * 6, z = Z[i] + NZ[i] * o + (rng() - 0.5) * 6;
       if (dist(x, z) < edge + 2.2) continue;
       if (bridgeRuns.length && dist(x, z, true) < W + 2) continue;
-      if (track.chasmContains(x, z)) continue;
+      if (track.chasmContains(x, z) || track.inSolidZone?.(x, z)) continue;
       tufts.push([x, z]);
     }
     const im = new THREE.InstancedMesh(cross, mat, tufts.length);
@@ -811,7 +891,7 @@ function addScenery(group, track, { rng, low, bridgeRuns, W, edge, breakables, m
   }
 
   // cercas brancas dos dois lados (so em terra)
-  if (!city) {
+  if (!city && !mtn) {
     const posts = [], railsA = [], railsB = [];
     const step = Math.round(2.2 / track.ds) || 2;
     for (const sg of [-1, 1]) {

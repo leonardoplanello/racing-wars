@@ -6,11 +6,11 @@ import { createScene } from '/host/render/scene.js';
 import { buildWorld } from '/host/render/world.js';
 import { buildTrack } from '/sim/track.js';
 import testCircuit from '/sim/tracks/testcircuit.js';
-import downtown from '/sim/tracks/downtown.js';
+import mountain from '/sim/tracks/mountain.js';
 
 const LS_TRACK = 'rw-debug-track';
 const qs = new URLSearchParams(location.search);
-const BASES = { [testCircuit.id]: testCircuit, [downtown.id]: downtown }; // ?track=<id> escolhe a pista
+const BASES = { [testCircuit.id]: testCircuit, [mountain.id]: mountain }; // ?track=<id> escolhe a pista
 const TRACK_ID = BASES[qs.get('track')] ? qs.get('track') : testCircuit.id;
 const BASE = BASES[TRACK_ID];
 const quality = qs.get('q') === 'high' ? 'high' : 'low';

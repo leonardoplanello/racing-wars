@@ -68,7 +68,7 @@ export function buildScenery(track, seed = 99) {
       const d = dist(x, z);
       if (d < clear + minD || d > maxD) continue;
       if (hasBridge && dist(x, z, true) < river + 4) continue;
-      if (track.chasmContains(x, z)) continue; // nada dentro do precipicio
+      if (track.chasmContains(x, z) || track.inSolidZone?.(x, z)) continue; // nada dentro do precipicio
       out.push([x, z]);
     }
     return out;

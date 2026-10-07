@@ -2,10 +2,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { thumbSvg, thumbUri } from '../shared/thumb.js';
 import testCircuit from '../sim/tracks/testcircuit.js';
-import downtown from '../sim/tracks/downtown.js';
+import mountain from '../sim/tracks/mountain.js';
 
 test('miniatura: SVG valido com o traçado dentro da caixa', () => {
-  for (const def of [testCircuit, downtown]) {
+  for (const def of [testCircuit, mountain]) {
     const svg = thumbSvg(def.points, { w: 200, h: 120 });
     assert.match(svg, /^<svg [^>]*viewBox="0 0 200 120"/);
     assert.match(svg, /<path d="M[\d.,\-L]+Z"/);

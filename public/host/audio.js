@@ -98,7 +98,8 @@ export class GameAudio {
     if (accent) this.guitar(f * 3, t, spb * 1.6, 0.5); // quinta
     // bateria
     if (i === 0 || i === 4) this.kick(t);
-    if (i === 2 || i === 6) this.snare(t);
+    // caixa e hi-hat desligados: o ruido agudo constante incomodava
+    // if (i === 2 || i === 6) this.snare(t);
     // this.hat(t, i % 2 ? 0.4 : 0.8);
   }
   guitar(f, t, dur, vol) {

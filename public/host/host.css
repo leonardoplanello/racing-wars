@@ -152,3 +152,4 @@ body.split #hud .kill { top: auto; bottom: 8px; }
   .lobby .btn { padding-top: 4px !important; padding-bottom: 4px !important; }
   .hint { line-height: 1.15; }
 }
+.tcard.folder { border-color: #ffd60a66; background: #1d2a44; }

@@ -93,7 +93,26 @@ export class Items {
       ? [[-0.62, 0], [0.62, 0], [0, 4.5], [-0.34, 9], [0.34, 9]]
       : [[-0.5, 0], [0.5, 0], [0, 5]];
     // caixas avulsas (`def.boxes`: {x, z, h?} em coordenadas do mundo; h = altura extra: so quem esta no ar pega)
-    for (const bx of this.track.def.boxes || []) {
+    const L = this.track.length, tr = this.track;
+    const edgeAt = (i) => tr.HW[i] + tr.verge;
+    const list = [];
+    for (const bx of tr.def.boxes || []) {
+      if (!bx.at) { list.push(bx); continue; }
+      // posicao na pista: at = [fracao da volta, 'R'|'L'|deslocamento]; 'R'/'L' = beirada (borda menos `inset`)
+      const pt = tr.pointAt(bx.at[0] * L);
+      const o = bx.at[1] === 'R' ? edgeAt(pt.idx) - (bx.inset ?? 2) : bx.at[1] === 'L' ? -(edgeAt(pt.idx) - (bx.inset ?? 2)) : bx.at[1];
+      list.push({ ...bx, x: pt.x + pt.nx * o, z: pt.z + pt.nz * o });
+    }
+    // fileiras de caixas na beirada: {from, to, every, side: 'R'|'L', inset}
+    for (const r of tr.def.boxRows || []) {
+      const a = r.from * L, b = (r.to <= r.from ? r.to + 1 : r.to) * L;
+      for (let q = a; q < b; q += r.every) {
+        const pt = tr.pointAt(q);
+        const o = (r.side === 'L' ? -1 : 1) * (edgeAt(pt.idx) - (r.inset ?? 2));
+        list.push({ x: pt.x + pt.nx * o, z: pt.z + pt.nz * o });
+      }
+    }
+    for (const bx of list) {
       const nr = this.track.nearest(bx.x, bx.z, -1, this.track.newNear());
       // `y` (opcional) = altura absoluta da caixa (pistas de mapa); sem ela vale a altura da pista em `s`
       const gy = bx.y !== undefined ? bx.y - (bx.h ?? 0) : bx.h ? this.track.elevAt(nr.s) : 0;

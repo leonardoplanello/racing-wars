@@ -1,14 +1,14 @@
-// Simulacao headless com bots para observar o ritmo das rodadas: node tools/balance.js [bots] [copa] [pista: test|downtown]
+// Simulacao headless com bots para observar o ritmo das rodadas: node tools/balance.js [bots] [copa] [pista: test|mountain]
 import { buildTrack } from '../sim/track.js';
 import tc from '../sim/tracks/testcircuit.js';
-import downtown from '../sim/tracks/downtown.js';
+import mountain from '../sim/tracks/mountain.js';
 import { Game } from '../sim/game.js';
 import { makeBrain, think } from '../sim/ai.js';
 import { makeRng } from '../sim/rng.js';
 
 const n = Number(process.argv[2]) || 8;
 const cup = process.argv[3] || 'war';
-const track = buildTrack(process.argv[4] === 'downtown' ? downtown : tc);
+const track = buildTrack(process.argv[4] === 'mountain' ? mountain : tc);
 const g = new Game(Array.from({ length: n }, (_, i) => ({ id: i, name: 'P' + i, color: i, isBot: true })), { track, cup, seed: 2 });
 const rng = makeRng(3);
 const br = new Map(g.cars.map((c) => [c.id, makeBrain(rng, 0.6 + rng() * 0.4)]));

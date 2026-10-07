@@ -10,7 +10,7 @@ import { CAR, HULL } from '/sim/car.js';
 import { makeBrain, think, DIFFICULTY_LABEL, DIFFICULTY_ORDER } from '/sim/ai.js';
 import { makeRng } from '/sim/rng.js';
 import testCircuit from '/sim/tracks/testcircuit.js';
-import downtown from '/sim/tracks/downtown.js';
+import mountain from '/sim/tracks/mountain.js';
 import { HostNet } from './net.js';
 import { UI, qrSvg } from './ui.js';
 import { GameAudio } from './audio.js?v=2';
@@ -35,7 +35,7 @@ const CUPS = [
 ];
 const TRACKS = [
   { id: 'test', icon: '🧪', name: 'Ponte do Rio (teste)', desc: 'Circuito de teste (~1,5 min por volta): ponte sobre o rio, rampas de salto, curvas fechadas e uma area alta sem grades.', def: testCircuit },
-  { id: 'downtown', icon: '🏙️', name: 'Downtown', desc: 'Metrópole ao entardecer (~4 min por volta): quarteirões técnicos, posto de gasolina que explode, carretas-rampa e salto do viaduto para a rodovia.', def: downtown },
+  { id: 'mountain', icon: '⛰️', name: 'Passo da Montanha', desc: 'Serra de terra e pedra (~2 min por volta): ponte no desfiladeiro, grampos de serra, precipícios sem grade, rampas de salto e um platô alto no cume.', def: mountain },
   { icon: '🌊', name: 'Water Hill', desc: 'Em breve.', locked: true },
   { icon: '🏜️', name: 'Death Mountain', desc: 'Em breve.', locked: true },
   { icon: '🌽', name: 'Farm Jump', desc: 'Em breve.', locked: true },
@@ -54,15 +54,34 @@ async function loadRemoteTracks() {
     const want = qs.get('track');
     // so as pistas que os bots completam (playable); com ?track=<id> a pista pedida entra mesmo assim (teste)
     const list = idx.tracks.filter((t) => t.ok && (t.playable || t.id === want)).map((t) => ({
-      id: t.id, icon: '🦔', name: t.name, race: true, laps: t.laps, subtitle: t.subtitle || 'SRB2Kart',
+      id: t.id, icon: '🦔', group: 'sonic', name: t.name, race: true, laps: t.laps, subtitle: t.subtitle || 'SRB2Kart',
       desc: `${t.subtitle || 'SRB2Kart'} · ${t.laps} voltas · ~${Math.round(t.length / 34 / 60 * 10) / 10} min`,
       remote: REMOTE_BASE + t.file,
       thumb: t.thumb ? REMOTE_BASE + t.thumb : '', padThumb: t.thumb ? '../tracks/srb2kart/' + t.thumb : '',
     }));
-    TRACKS.splice(2, 0, ...list);
-    if (want) { const i = TRACKS.findIndex((t) => t.id === want); if (i >= 0) S.trackIdx = i; }
+    if (list.length) {
+      // as pistas do Sonic ficam numa pasta: na raiz do menu aparece so o item-pasta
+      const folder = { id: 'folder:sonic', folder: 'sonic', icon: '🦔', name: 'Pistas Sonic', subtitle: `${list.length} pistas`, desc: `Pasta com ${list.length} pistas do SRB2Kart (campeonatos de 1, 3 ou 5 pistas). OK abre a pasta, VOLTAR sai dela.`, thumb: list[0].thumb, padThumb: list[0].padThumb };
+      TRACKS.splice(2, 0, folder, ...list);
+    }
+    if (want) selectTrack(want);
     if (S.phase === 'tracks') refresh();
   } catch {}
+}
+
+/** Pistas visiveis no menu: a raiz (sem `group`) ou o conteudo da pasta aberta (`S.folder`). */
+const visibleTracks = () => TRACKS.filter((t) => (S.folder ? t.group === S.folder : !t.group));
+/** Seleciona uma pista pelo id, abrindo a pasta dela se for o caso. */
+function selectTrack(id) {
+  const i = TRACKS.findIndex((t) => t.id === id);
+  if (i < 0) return;
+  S.trackIdx = i;
+  S.folder = TRACKS[i].group || null;
+}
+/** Move a selecao `d` posicoes dentro da lista visivel (circular). */
+function stepTrack(d) {
+  const vis = visibleTracks(), n = vis.length;
+  S.trackIdx = TRACKS.indexOf(vis[(Math.max(0, vis.indexOf(TRACKS[S.trackIdx])) + d + n) % n]);
 }
 
 const ui = new UI();
@@ -102,6 +121,7 @@ const S = {
   cupIdx: 1,
   geysers: [],
   trackIdx: Math.max(0, TRACKS.findIndex((t) => t.id === qs.get('track'))),
+  folder: null, // pasta aberta no seletor de circuitos (ex.: 'sonic')
   ips: [],
   ipIdx: 0,
   port: location.port || 80,
@@ -223,10 +243,10 @@ function phoneView(id) {
   const v = { ...base, mode: isMaster ? 'menu' : 'wait', title: titles[S.phase] || '' };
   if (S.phase === 'cups') v.info = { name: `${CUPS[S.cupIdx].icon} ${CUPS[S.cupIdx].name}`, sub: CUPS[S.cupIdx].desc };
   else if (S.phase === 'tracks') {
-    const t = TRACKS[S.trackIdx];
-    v.title = `Circuito ${S.trackIdx + 1}/${TRACKS.length} · ◀ ▶ trocar`;
+    const t = TRACKS[S.trackIdx], vis = visibleTracks();
+    v.title = `${S.folder ? 'Pasta Sonic · ' : ''}Circuito ${vis.indexOf(t) + 1}/${vis.length} · ◀ ▶ trocar`;
     v.info = { name: `${t.icon} ${t.name}`, sub: t.locked ? 'Em breve' : t.subtitle || '', thumb: t.padThumb || '', extra: t.race ? `${t.laps} voltas · campeonato: ${S.champLen} ${S.champLen > 1 ? 'pistas' : 'pista'} (▲▼)` : '' };
-    v.ok = t.locked ? 'EM BREVE' : 'COMEÇAR';
+    v.ok = t.locked ? 'EM BREVE' : t.folder ? 'ABRIR ▸' : 'COMEÇAR';
   } else if (S.phase === 'results' && S.champ) {
     v.title = S.champ.isLast ? 'Fim do campeonato' : `Pista ${S.champ.round}/${S.champ.tracks.length} concluída`;
     v.ok = S.champ.isLast ? 'LOBBY' : 'PRÓXIMA ▶';
@@ -280,7 +300,7 @@ function refresh() {
       ips: S.ips.length, ipIdx: S.ipIdx,
     });
   } else if (S.phase === 'cups') ui.cups(CUPS, S.cupIdx);
-  else if (S.phase === 'tracks') ui.tracks(TRACKS, S.trackIdx, S.champLen);
+  else if (S.phase === 'tracks') { const vis = visibleTracks(); ui.tracks(vis, Math.max(0, vis.indexOf(TRACKS[S.trackIdx])), S.champLen, S.folder); }
   syncPhones();
 }
 
@@ -318,14 +338,21 @@ function nav(k, idx, fromPhone = false) {
       else if (k === 'back') goto('lobby');
       break;
     case 'tracks':
-      if (k === 'left') { S.trackIdx = (S.trackIdx + TRACKS.length - 1) % TRACKS.length; refresh(); }
-      else if (k === 'right') { S.trackIdx = (S.trackIdx + 1) % TRACKS.length; refresh(); }
-      else if (k === 'pick') { S.trackIdx = idx; refresh(); }
+      if (k === 'left') { stepTrack(-1); refresh(); }
+      else if (k === 'right') { stepTrack(1); refresh(); }
+      else if (k === 'pick') { S.trackIdx = TRACKS.indexOf(visibleTracks()[idx]); refresh(); }
       else if (k === 'up' || k === 'down') {
         if (TRACKS[S.trackIdx].race) { S.champLen = CHAMP_LENS[(CHAMP_LENS.indexOf(S.champLen) + (k === 'up' ? 1 : CHAMP_LENS.length - 1)) % CHAMP_LENS.length]; refresh(); }
       }
-      else if (k === 'ok') { if (!TRACKS[S.trackIdx].locked) startGame(); }
-      else if (k === 'back') goto('cups');
+      else if (k === 'ok') {
+        const t = TRACKS[S.trackIdx];
+        if (t.folder) { S.folder = t.folder; S.trackIdx = TRACKS.findIndex((x) => x.group === t.folder); refresh(); }
+        else if (!t.locked) startGame();
+      }
+      else if (k === 'back') {
+        if (S.folder) { S.trackIdx = TRACKS.findIndex((x) => x.folder === S.folder); S.folder = null; refresh(); }
+        else goto('cups');
+      }
       break;
     case 'game':
       if (k === 'back' && !S.paused) { S.paused = true; ui.pause(); audio.setEngine(0, false); }
@@ -372,8 +399,7 @@ function preloadNext() {
 /** Proxima pista do campeonato (botao PROXIMA da tela de resultados). */
 function nextRace() {
   if (!S.champ || !S.champ.advance()) { quitToLobby(); return; }
-  const i = TRACKS.findIndex((t) => t.id === S.champ.trackId);
-  if (i >= 0) S.trackIdx = i;
+  selectTrack(S.champ.trackId);
   ui.bannerClear();
   ui.clearHud();
   startGame({ next: true });

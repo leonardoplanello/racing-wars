@@ -2,10 +2,10 @@
 // Rumo h: frente = (cos h, sin h); aumentar h = virar para a direita. Normal "direita" = (-tz, tx).
 
 // OFF1..OFF3 = fora de pista do SRB2Kart (forca 1-3: velocidade x0,5 / x0,33 / x0,25); ICE = gelo (so pistas de mapa)
-export const SURF = { ASPHALT: 0, WOOD: 1, DIRT: 2, STONE: 3, OFF1: 4, OFF2: 5, OFF3: 6, ICE: 7 };
+export const SURF = { ASPHALT: 0, WOOD: 1, DIRT: 2, STONE: 3, OFF1: 4, OFF2: 5, OFF3: 6, ICE: 7, SAND: 8 };
 // coeficiente de atrito por superficie (escala a aderencia dos pneus) e fator da velocidade de cruzeiro
-export const SURF_MU = [1.0, 0.85, 0.85, 0.95, 0.7, 0.55, 0.45, 0.25];
-export const SURF_SPEED = [1, 0.98, 0.97, 1, 0.5, 0.34, 0.25, 1];
+export const SURF_MU = [1.0, 0.85, 0.85, 0.95, 0.7, 0.55, 0.45, 0.25, 0.8];
+export const SURF_SPEED = [1, 0.98, 0.97, 1, 0.5, 0.34, 0.25, 1, 0.97];
 
 function catmull(p0, p1, p2, p3, t) {
   const t2 = t * t;
@@ -26,7 +26,9 @@ export function buildTrack(def, spacing = 1) {
   const n = pts.length;
   // amostragem densa
   const dense = [];
+  const denseAt = []; // indice denso de cada ponto de controle (para `def.profile`)
   for (let i = 0; i < n; i++) {
+    denseAt.push(dense.length);
     const p0 = pts[(i - 1 + n) % n], p1 = pts[i], p2 = pts[(i + 1) % n], p3 = pts[(i + 2) % n];
     const chord = Math.hypot(p2[0] - p1[0], p2[1] - p1[1]);
     const k = Math.max(8, Math.ceil(chord * 4));
@@ -90,6 +92,26 @@ export function buildTrack(def, spacing = 1) {
       ELEV[i] = deck * (1 - t * t * (3 - 2 * t));
     }
   }
+  // perfil de altura por ponto de controle (`profile: [[indice, altura], ...]`): linear ao longo da pista, suavizado (~30 u)
+  if (def.profile && def.profile.length > 1) {
+    const prof = def.profile.map(([ci, h]) => [cum[denseAt[ci]] * (N * ds) / total, h]); // s (comprimento reamostrado) de cada ponto
+    const raw = new Float32Array(N).fill(-1);
+    for (let i = 0; i < N; i++) {
+      const sv = i * ds;
+      if (sv < prof[0][0] || sv > prof[prof.length - 1][0]) continue;
+      let q = 0;
+      while (q < prof.length - 2 && sv > prof[q + 1][0]) q++;
+      const [s0, h0] = prof[q], [s1, h1] = prof[q + 1];
+      raw[i] = h0 + (h1 - h0) * ((sv - s0) / (s1 - s0 || 1));
+    }
+    const win = Math.max(1, Math.round(15 / ds));
+    for (let i = 0; i < N; i++) {
+      if (raw[i] < 0) continue;
+      let a = 0, c = 0;
+      for (let o = -win; o <= win; o++) { const v = raw[(i + o + N) % N]; if (v >= 0) { a += v; c++; } }
+      ELEV[i] = Math.max(ELEV[i], a / c);
+    }
+  }
   // colinas/rampas: subida suave de `rise` unidades, topo plano e descida suave (`fall`) ou labio abrupto (fall = 0)
   const RAILS = new Uint8Array(N).fill(1);
   const HSKIN = new Uint8Array(N); // 1 = a colina e uma carreta (visual: chassi de aco, rodas)
@@ -113,10 +135,17 @@ export function buildTrack(def, spacing = 1) {
     }
   }
   // precipicios: fosso fundo ao lado da pista (side: 1 direita, -1 esquerda, 0 os dois); sem cerca desse lado
-  const CH = new Int8Array(N), CHW = new Float32Array(N);
+  // `gap`: distancia entre a borda e o inicio do precipicio (praia); `water`: oceano (render com agua)
+  const CH = new Int8Array(N), CHW = new Float32Array(N), CHG = new Float32Array(N).fill(0.3), CHWATER = new Uint8Array(N);
   for (const c of def.chasms || []) {
     const sv = c.side === 0 ? 2 : c.side === 1 ? 1 : -1;
-    mark(c.from, c.to, (i) => { CH[i] = CH[i] && CH[i] !== sv ? 2 : sv; CHW[i] = Math.max(CHW[i], c.width ?? 60); });
+    mark(c.from, c.to, (i) => { CH[i] = CH[i] && CH[i] !== sv ? 2 : sv; CHW[i] = Math.max(CHW[i], c.width ?? 60); CHG[i] = c.gap ?? 0.3; if (c.water) CHWATER[i] = 1; });
+  }
+  // paredes solidas por lado em terra aberta (`solidWalls`: {from,to,side}): ex.: a parede da montanha
+  const SOLID = new Uint8Array(N);
+  for (const z of def.solidWalls || []) {
+    const bit = z.side === 0 || z.side === undefined ? 3 : z.side === 1 ? 2 : 1;
+    mark(z.from, z.to, (i) => { SOLID[i] |= bit; });
   }
   const halfWidth = def.halfWidth ?? 10;
   const HW = new Float64Array(N).fill(halfWidth);
@@ -144,7 +173,7 @@ export function buildTrack(def, spacing = 1) {
 
   const track = {
     def, name: def.name, N, ds, length: N * ds,
-    X, Z, TX, TZ, NX, NZ, SURFACE, HW, BRIDGE, ELEV, RAILS, CH, CHW, OPEN, WALL, HSKIN,
+    X, Z, TX, TZ, NX, NZ, SURFACE, HW, BRIDGE, ELEV, RAILS, CH, CHW, CHG, CHWATER, SOLID, OPEN, WALL, HSKIN,
     halfWidth, verge: def.verge ?? 0, boundary: def.boundary || 'wall',
     theme: def.theme || {},
     newNear: () => ({ idx: -1, s: 0, d: 0, nx: 0, nz: 1, tx: 1, tz: 0, cx: 0, cz: 0, dist: 0 }),
@@ -253,7 +282,7 @@ export function buildTrack(def, spacing = 1) {
       const side = near.d > 0 ? 1 : -1;
       if (c !== 2 && c !== side) return false;
       const a = Math.abs(near.d), edge = HW[near.idx] + this.verge;
-      return a > edge + 0.3 && a < edge + CHW[near.idx];
+      return a > edge + CHG[near.idx] && a < edge + CHW[near.idx];
     },
     hasChasm: CH.some((v) => v !== 0),
     /** (x,z) cai dentro de algum precipicio? (busca global; so para cenario) */
@@ -269,10 +298,17 @@ export function buildTrack(def, spacing = 1) {
      * Nas `openZones` o lado aberto (d>=0 direita) nao tem muro.
      */
     hardWall(i, d = 0) {
-      if (def.openLand) return BRIDGE[i] === 1;
+      if (def.openLand) return BRIDGE[i] === 1 || (SOLID[i] & (d >= 0 ? 2 : 1)) !== 0;
       const o = OPEN[i];
       if (!o) return true;
       return !(o & (d >= 0 ? 2 : 1));
+    },
+    hasSolid: SOLID.some((v) => v !== 0),
+    /** (x,z) cai na encosta da parede solida (`solidWalls`, ate `reach` alem da borda)? So para cenario. */
+    inSolidZone(x, z, reach = 150) {
+      if (!this.hasSolid) return false;
+      const nr = this.nearest(x, z, -1, this._sz || (this._sz = this.newNear()));
+      return (SOLID[nr.idx] & (nr.d >= 0 ? 2 : 1)) !== 0 && Math.abs(nr.d) < HW[nr.idx] + this.verge + reach;
     },
     /** A pista tem `openZones`? */
     hasOpen: OPEN.some((v) => v !== 0),

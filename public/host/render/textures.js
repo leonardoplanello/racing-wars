@@ -408,6 +408,48 @@ export function cityGroundTexture() {
   return toTex(c);
 }
 
+/** Areia da praia: bege com graos e ondulacoes claras. */
+export function sandTexture() {
+  const rng = makeRng(57);
+  const [c, g] = canvas(256, 256);
+  g.fillStyle = '#e3cf9a'; g.fillRect(0, 0, 256, 256);
+  for (let i = 0; i < 2600; i++) {
+    const k = 0.82 + rng() * 0.3;
+    g.fillStyle = shade(227, 207, 154, k); g.globalAlpha = 0.4;
+    g.beginPath(); g.arc(rng() * 256, rng() * 256, 0.8 + rng() * 2, 0, 7); g.fill();
+  }
+  g.globalAlpha = 1;
+  for (let i = 0; i < 14; i++) { // ondulacoes
+    g.strokeStyle = 'rgba(190,160,100,.28)'; g.lineWidth = 2;
+    const y = rng() * 256; g.beginPath(); g.moveTo(0, y);
+    for (let x = 0; x <= 256; x += 32) g.lineTo(x, y + Math.sin(x * 0.05 + i) * 4);
+    g.stroke();
+  }
+  return toTex(c);
+}
+
+/** Chao de serra: cascalho cinza-azulado com manchas de neve e capim seco. */
+export function rockGroundTexture() {
+  const rng = makeRng(41);
+  const [c, g] = canvas(256, 256);
+  g.fillStyle = '#7d8189'; g.fillRect(0, 0, 256, 256);
+  for (let i = 0; i < 2200; i++) {
+    const v = 90 + rng() * 80;
+    g.fillStyle = `rgba(${v},${v + 2},${v + 8},${0.25 + rng() * 0.35})`;
+    g.beginPath(); g.arc(rng() * 256, rng() * 256, 1 + rng() * 3, 0, 7); g.fill();
+  }
+  for (let i = 0; i < 26; i++) {
+    g.fillStyle = 'rgba(245,250,255,.55)';
+    g.beginPath(); g.ellipse(rng() * 256, rng() * 256, 6 + rng() * 14, 3 + rng() * 8, rng() * 3, 0, 7); g.fill();
+  }
+  for (let i = 0; i < 160; i++) {
+    g.strokeStyle = `rgba(${110 + rng() * 40},${120 + rng() * 40},70,.45)`;
+    const x = rng() * 256, y = rng() * 256;
+    g.beginPath(); g.moveTo(x, y); g.lineTo(x + (rng() - 0.5) * 4, y - 3 - rng() * 5); g.stroke();
+  }
+  return toTex(c);
+}
+
 /** Fachada de predio: andares com janelas (acesas ao acaso). `tone` = cor-base. */
 export function facadeTexture(tone = '#6b7280', seed = 31) {
   const rng = makeRng(seed);

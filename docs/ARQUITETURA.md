@@ -14,7 +14,9 @@ celulares (/pad) --WebSocket--> servidor Node <--WebSocket-- host (/ , tela prin
 - **Valores ao vivo**: constantes (`CAR`, `CAMERA`, `WHOMP`...) são objetos mutáveis lidos a cada passo; o editor de debug (`public/host/debug-editor.js`) as edita sem recarregar.
 - **Relevo da pista**: `def.hills` (`from`, `to`, `height`, `rise`, `fall`, `rails`) vira `track.ELEV`; `fall: 0` faz uma rampa de salto (empina até o lábio). `track.RAILS` marca onde há cerca. `def.chasms` cria precipícios ao lado da pista (`track.CH`, `track.chasmAt`): quem entra cai e morre. Quem está abaixo do tabuleiro bate na falésia (`track.cliffAt`).
 
-**Pistas urbanas (Downtown)** — campos extras de `def`:
+**Campos de `def` da montanha/praia**: `solidWalls:[{from,to,side}]` (parede sólida num lado mesmo em `openLand`; `track.SOLID`, `hardWall`; o render faz parede de rocha + encosta com neve e o cenário aleatório evita a encosta, `inSolidZone`); `chasms[]` com `gap` (distância da borda até o precipício) e `water:true` (oceano: o render põe água em vez do poço preto); `boxes[].at` (`[fração,'R'|'L'|desloc]`) e `boxRows:[{from,to,every,side,inset}]` (caixas na beirada); `SURF.SAND` (areia, textura `sandTexture`). Rampas de salto (`hills` com `fall:0`) devem ficar em **reta** (antes e depois do lábio): em curva o carro pousa fora da estrada e explode por `offroad` (testado em `test/mountain.test.js`).
+
+**Campos extras de `def`** (pistas urbanas; hoje nenhuma pista própria os usa, o motor continua suportando):
 - `widths: [{from,to,hw,blend}]`: meia-largura por trecho (`track.HW`, `hwAt/edgeAt`); o render lê `HW[k]`, não mais uma largura única.
 - `openZones: [{from,to,side}]`: sem muro naquele lado (`track.OPEN`, `hardWall(i, d)`): praça, beco, brecha do guard-rail.
 - `walls: [{from,to,style}]` e `wallStyle` (`fence|building|jersey|none`): estilo do muro; `building` gera os prédios atrás do muro (`render/city.js`).
@@ -28,7 +30,7 @@ celulares (/pad) --WebSocket--> servidor Node <--WebSocket-- host (/ , tela prin
 server/index.js        http estático + WebSocket relay + /api/lan
 shared/protocol.js     mensagens, codec binário de input, cores
 sim/                   rng, track, car, body (corpo rígido 3D), items, game (rodadas/pontos/pneus), ai, camera, scenery (colisores do cenário)
-sim/tracks/            definição das pistas (testcircuit, downtown)
+sim/tracks/            definição das pistas (testcircuit, mountain)
 public/editor/         editor de mapa (pontos, rampas, materiais, objetos)
 public/host/           tela principal (main, net, ui, audio, kbd, debug, debug-editor)
 public/host/render/    Three.js: scene (tema), world (pista/cenário), city (prédios/skyline), props, structures, models (picape, semáforo), cars, fx, textures (canvas)
